@@ -1,0 +1,92 @@
+import React, { useState } from 'react';
+import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { router } from 'expo-router';
+import { supabase } from '../services/supabase';
+import { useAppDispatch } from '../store/hooks';
+import { setSession } from '../features/authSlice';
+import CustomButton from '../components/CustomButton';
+import GlitchText from '../components/GlitchText';
+import Colors from '../constants/Colors';
+
+export default function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const dispatch = useAppDispatch();
+
+  const handleSignIn = async () => {
+    if (!email || !password) {
+      Alert.alert('SYSTEM_ERROR', 'Yêu cầu nhập Email và Mật khẩu.');
+      return;
+    }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    if (error) {
+      Alert.alert('ACCESS_DENIED', error.message);
+    } else if (data.session?.user) {
+      // THÊM THÔNG BÁO THÀNH CÔNG Ở ĐÂY
+      Alert.alert('SYSTEM_ONLINE', 'Xác thực thành công. Đang tải dữ liệu...');
+      
+      dispatch(setSession({
+        id: data.session.user.id,
+        email: data.session.user.email || '',
+      }));
+      
+      setTimeout(() => {
+        router.replace('/' as any);
+      }, 100); 
+    }
+    setLoading(false);
+  };
+
+  return (
+    <View style={styles.container}>
+      <GlitchText text="LOGIN" />
+      
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>EMAIL //:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="sys.admin@cyborg.net"
+          placeholderTextColor={Colors.textLight}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
+      </View>
+      
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>PASSWORD //:</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="********"
+          placeholderTextColor={Colors.textLight}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+      </View>
+
+      <CustomButton title="INITIALIZE" onPress={handleSignIn} loading={loading} />
+      
+      <View style={styles.footer}>
+        <Text style={styles.footerText}>Chưa có tài khoản?</Text>
+        <TouchableOpacity onPress={() => router.push('/register' as any)}>
+          <Text style={styles.link}>[ ĐĂNG KÝ NGAY ]</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: Colors.background },
+  inputGroup: { marginBottom: 20 },
+  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 5 },
+  input: { backgroundColor: Colors.surface, color: Colors.white, padding: 15, borderWidth: 1, borderColor: Colors.border, fontFamily: 'monospace' },
+  footer: { marginTop: 20, alignItems: 'center' },
+  footerText: { color: Colors.textLight, fontFamily: 'monospace', marginBottom: 10 },
+  link: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' }
+});
