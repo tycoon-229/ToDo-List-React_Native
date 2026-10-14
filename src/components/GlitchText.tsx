@@ -101,13 +101,15 @@ export default function GlitchText({ text, fontSize = 40 }: GlitchTextProps) {
 }
 
 const styles = StyleSheet.create({
+  
   container: {
     position: 'relative',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
-    marginBottom: 40,
-    alignSelf: 'center',
+    alignSelf: 'auto',
+    marginBottom: 0,
   },
+
   mainText: {
     fontWeight: '900',
     color: Colors.white,

@@ -7,9 +7,12 @@ export interface Task {
   status: 'TODO' | 'COMPLETED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
   due_date?: string;
+  reminder_time?: string;
   user_id?: string;
   category_id?: string | null;
   tags?: string;
+  recurrence?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  streak?: number;
 }
 
 interface TasksState {

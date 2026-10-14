@@ -5,10 +5,12 @@ import { store } from '../store/store';
 import { supabase } from '../services/supabase';
 import { useAppDispatch } from '../store/hooks';
 import { setSession, clearSession } from '../features/authSlice';
+import { useNotificationMonitor } from '../hooks/useNotificationMonitor';
 
 // Component khôi phục phiên bản ghi
 function AuthInitializer({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch();
+  useNotificationMonitor();
 
   useEffect(() => {
     // 1. Kiểm tra session ngay khi khởi động app hoặc khi Hot Reload
@@ -51,6 +53,10 @@ export default function RootLayout() {
           <Stack.Screen name="register" />
           <Stack.Screen name="calendar" />
           <Stack.Screen name="categories" />
+          <Stack.Screen name="analytics" />
+          <Stack.Screen name="task/[id]" />
+          <Stack.Screen name="edit/[id]" />
+          <Stack.Screen name="focus" />
         </Stack>
       </AuthInitializer>
     </Provider>

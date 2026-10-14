@@ -1,44 +1,92 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, ActivityIndicator, Modal, Platform, ScrollView, Animated, Dimensions } from 'react-native';
-import { router } from 'expo-router';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useFocusEffect, router } from 'expo-router';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  FlatList, 
+  StyleSheet, 
+  Alert, 
+  ActivityIndicator, 
+  Modal, 
+  Platform, 
+  ScrollView 
+} from 'react-native';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { setTasks, addTask, toggleTaskStatus, deleteTask } from '../features/tasksSlice';
 import { setCategories } from '../features/categoriesSlice';
 import { clearSession } from '../features/authSlice';
+import { toggleNotifications, setDefaultOffset } from '../features/settingsSlice';
 import { supabase } from '../services/supabase';
+import { requestBrowserPermission, triggerCyborgNotification } from '../services/notificationService';
 import GlitchText from '../components/GlitchText';
 import TaskItem from '../components/TaskItem';
 import CustomButton from '../components/CustomButton';
 import Colors from '../constants/Colors';
+import { setSubtasks } from '../features/subtasksSlice';
 
 export default function Home() {
   const { user, isAuthenticated } = useAppSelector(state => state.auth);
   const tasks = useAppSelector(state => state.tasks.tasksList);
   const categoriesList = useAppSelector(state => state.categories.list);
+  const { notificationsEnabled, defaultOffsetMinutes } = useAppSelector(state => state.settings);
   const dispatch = useAppDispatch();
   
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setModalVisible] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
-  
-  // State điều khiển Drawer bên phải
+
+  // Điều khiển Dropdown Category & Drawer
+  const [showCatDropdown, setShowCatDropdown] = useState(false);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
 
+  // --- STATE TÌM KIẾM VÀ LỌC MA TRẬN (MODULE 6) ---
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'TODO' | 'COMPLETED'>('ALL');
+  const [filterPriority, setFilterPriority] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH'>('ALL');
+  const [filterCategoryId, setFilterCategoryId] = useState<string | 'ALL'>('ALL');
+
+  // Form State tạo Task mới
   const [newTask, setNewTask] = useState({
-    title: '', description: '', priority: 'MEDIUM' as 'LOW' | 'MEDIUM' | 'HIGH', dueDate: '', categoryId: null as string | null, tags: ''
+    title: '', 
+    description: '', 
+    priority: 'MEDIUM' as 'LOW' | 'MEDIUM' | 'HIGH', 
+    dueDate: '', 
+    reminderTime: '',
+    categoryId: null as string | null, 
+    tags: ''
   });
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchData();
-    }
-  }, [isAuthenticated]);
+  // Tự động làm mới dữ liệu mỗi khi người dùng quay lại màn hình Home
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated && user?.id) {
+        fetchData();
+      }
+    }, [isAuthenticated, user?.id])
+  );
 
   const fetchData = async () => {
     setLoading(true);
-    const { data: tasksData } = await supabase.from('tasks').select('*').eq('user_id', user?.id).order('created_at', { ascending: false });
+    const { data: tasksData } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', user?.id)
+      .order('created_at', { ascending: false });
+
+    // Tải toàn bộ subtask
+    const { data: subData } = await supabase.from('subtasks').select('*');
+    if (subData) dispatch(setSubtasks(subData));
+
     if (tasksData) dispatch(setTasks(tasksData));
-    const { data: catsData } = await supabase.from('categories').select('*').eq('user_id', user?.id);
+
+    const { data: catsData } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('user_id', user?.id);
+
     if (catsData) dispatch(setCategories(catsData));
     setLoading(false);
   };
@@ -57,19 +105,38 @@ export default function Home() {
       else Alert.alert('SYS_ERR', 'TITLE không được để trống.');
       return;
     }
+
     setLoading(true);
     const insertData = { 
-      title: newTask.title, description: newTask.description, priority: newTask.priority,
-      due_date: newTask.dueDate || null, category_id: newTask.categoryId, tags: newTask.tags, user_id: user.id, status: 'TODO' 
+      title: newTask.title, 
+      description: newTask.description, 
+      priority: newTask.priority,
+      due_date: newTask.dueDate || null, 
+      reminder_time: newTask.reminderTime || null,
+      category_id: newTask.categoryId, 
+      tags: newTask.tags, 
+      user_id: user.id, 
+      status: 'TODO' 
     };
+
     const { data, error } = await supabase.from('tasks').insert([insertData]).select();
+
     if (error) {
       if (Platform.OS === 'web') window.alert(`SYS_ERR: ${error.message}`);
       else Alert.alert('SYS_ERR', error.message);
     } else {
       dispatch(addTask(data[0]));
       setModalVisible(false);
-      setNewTask({ title: '', description: '', priority: 'MEDIUM', dueDate: '', categoryId: null, tags: '' });
+      setNewTask({ 
+        title: '', 
+        description: '', 
+        priority: 'MEDIUM', 
+        dueDate: '', 
+        reminderTime: '', 
+        categoryId: null, 
+        tags: '' 
+      });
+      setShowCatDropdown(false);
     }
     setLoading(false);
   };
@@ -87,32 +154,77 @@ export default function Home() {
     await supabase.from('tasks').delete().eq('id', id);
   };
 
-  
-const sortedTasks = [...tasks].sort((a, b) => {
-  // Ưu tiên task TODO lên trước COMPLETED
-  if (a.status === 'TODO' && b.status === 'COMPLETED') return -1;
-  if (a.status === 'COMPLETED' && b.status === 'TODO') return 1;
+  const handleTestAlert = async () => {
+    const granted = await requestBrowserPermission();
+    if (granted || Platform.OS !== 'web') {
+      triggerCyborgNotification('SIGNAL_TEST', 'Kênh âm thanh cảnh báo Cyborg và Web Push hoạt động ổn định.');
+    } else {
+      window.alert('Vui lòng mở quyền thông báo (Notification) trên thanh địa chỉ trình duyệt.');
+    }
+  };
 
-  // Nếu tắt sắp xếp theo ngày thì giữ nguyên thứ tự trong từng nhóm
-  if (!sortAsc) return 0;
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setFilterStatus('ALL');
+    setFilterPriority('ALL');
+    setFilterCategoryId('ALL');
+  };
 
-  // Task không có deadline sẽ nằm dưới task có deadline
-  if (!a.due_date) return 1;
-  if (!b.due_date) return -1;
+  // --- THUẬT TOÁN TÌM KIẾM, LỌC ĐA TIÊU CHÍ VÀ SẮP XẾP ---
+  const processedTasks = useMemo(() => {
+    return tasks
+      .filter((task) => {
+        // 1. Lọc từ khóa tìm kiếm (Title, Description, Tags)
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          const matchTitle = task.title?.toLowerCase().includes(q);
+          const matchDesc = task.description?.toLowerCase().includes(q);
+          const matchTags = task.tags?.toLowerCase().includes(q);
+          if (!matchTitle && !matchDesc && !matchTags) return false;
+        }
 
-  // Sắp xếp deadline tăng dần
-  return new Date(a.due_date).getTime() -  new Date(b.due_date).getTime();
-});
+        // 2. Lọc theo trạng thái
+        if (filterStatus !== 'ALL' && task.status !== filterStatus) return false;
+
+        // 3. Lọc theo mức độ ưu tiên
+        if (filterPriority !== 'ALL' && task.priority !== filterPriority) return false;
+
+        // 4. Lọc theo danh mục
+        if (filterCategoryId !== 'ALL') {
+          if (filterCategoryId === 'ROOT' && task.category_id !== null) return false;
+          if (filterCategoryId !== 'ROOT' && task.category_id !== filterCategoryId) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Luôn ưu tiên TODO lên trước COMPLETED
+        if (a.status === 'TODO' && b.status === 'COMPLETED') return -1;
+        if (a.status === 'COMPLETED' && b.status === 'TODO') return 1;
+
+        if (!sortAsc) return 0;
+
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+
+        return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      });
+  }, [tasks, searchQuery, filterStatus, filterPriority, filterCategoryId, sortAsc]);
 
   if (!isAuthenticated) return <View style={styles.container} />;
 
-  const selectedCatName = newTask.categoryId === null ? '[ ROOT ]' : categoriesList.find(c => c.id === newTask.categoryId)?.name || '[ UNKNOWN ]';
+  const isFilterActive = searchQuery !== '' || filterStatus !== 'ALL' || filterPriority !== 'ALL' || filterCategoryId !== 'ALL';
+  const selectedCatName = newTask.categoryId === null 
+    ? '[ ROOT ]' 
+    : categoriesList.find(c => c.id === newTask.categoryId)?.name || '[ UNKNOWN ]';
 
   return (
     <View style={styles.container}>
-      {/* HEADER: Đổi thành nút SYS_MENU đơn giản ở góc phải */}
+      {/* HEADER */}
       <View style={styles.header}>
-        <GlitchText text="TASKS_DB" fontSize={30} />
+        <View style={styles.headerTitleWrapper}>
+          <GlitchText text="TASKS_DB" fontSize={26} />
+        </View>
         <TouchableOpacity 
           style={styles.menuToggleBtn} 
           onPress={() => setDrawerOpen(true)}
@@ -121,42 +233,186 @@ const sortedTasks = [...tasks].sort((a, b) => {
         </TouchableOpacity>
       </View>
 
+      {/* THANH TÌM KIẾM DÒNG LỆNH (LIVE SEARCH) */}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="SEARCH_QUERY //: gõ tên, mô tả hoặc tag..."
+          placeholderTextColor={Colors.textLight}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity style={styles.searchClearBtn} onPress={() => setSearchQuery('')}>
+            <Text style={styles.searchClearText}>[X]</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* TOOLBAR ĐIỀU KHIỂN & BẬT TẮT MA TRẬN LỌC */}
       <View style={styles.toolbar}>
-        <Text style={styles.label}>TOTAL_NODES: {tasks.length}</Text>
+        <View style={styles.toolbarLeft}>
+          <Text style={styles.label}>
+            MATCHED: {processedTasks.length}/{tasks.length}
+          </Text>
+          <TouchableOpacity 
+            style={[styles.filterToggleBtn, (showFilterPanel || isFilterActive) && styles.filterToggleBtnActive]} 
+            onPress={() => setShowFilterPanel(!showFilterPanel)}
+          >
+            <Text style={[styles.filterToggleText, (showFilterPanel || isFilterActive) && { color: Colors.background }]}>
+              [ FILTER_MATRIX {isFilterActive ? '*' : ''} ]
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity onPress={() => setSortAsc(!sortAsc)} style={styles.sortBtn}>
-          <Text style={styles.sortText}>SORT_BY_DEADLINE: [ {sortAsc ? 'ON' : 'OFF'} ]</Text>
+          <Text style={styles.sortText}>DEADLINE: [ {sortAsc ? 'ASC' : 'DEFAULT'} ]</Text>
         </TouchableOpacity>
       </View>
 
-      {loading && tasks.length === 0 ? <ActivityIndicator color={Colors.primary} size="large" /> : (
-        <FlatList data={sortedTasks} keyExtractor={(item) => item.id} renderItem={({ item }) => <TaskItem task={item} onToggle={handleToggle} onDelete={handleDelete} />} contentContainerStyle={{ paddingBottom: 100 }} />
+      {/* BẢNG LỌC MA TRẬN (EXPANDABLE FILTER PANEL) */}
+      {showFilterPanel && (
+        <View style={styles.filterMatrixCard}>
+          <View style={styles.filterMatrixHeader}>
+            <Text style={styles.filterMatrixTitle}>QUERY_FILTER_MATRIX //</Text>
+            {isFilterActive && (
+              <TouchableOpacity onPress={handleResetFilters}>
+                <Text style={styles.resetFilterText}>[ RESET_ALL ]</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* 1. Lọc Trạng thái */}
+          <Text style={styles.filterSubLabel}>STATUS //:</Text>
+          <View style={styles.filterRow}>
+            {(['ALL', 'TODO', 'COMPLETED'] as const).map((st) => (
+              <TouchableOpacity
+                key={st}
+                style={[styles.filterChip, filterStatus === st && styles.filterChipActive]}
+                onPress={() => setFilterStatus(st)}
+              >
+                <Text style={[styles.filterChipText, filterStatus === st && { color: Colors.background }]}>
+                  {st}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 2. Lọc Priority */}
+          <Text style={styles.filterSubLabel}>PRIORITY //:</Text>
+          <View style={styles.filterRow}>
+            {(['ALL', 'LOW', 'MEDIUM', 'HIGH'] as const).map((pr) => (
+              <TouchableOpacity
+                key={pr}
+                style={[styles.filterChip, filterPriority === pr && styles.filterChipActive]}
+                onPress={() => setFilterPriority(pr)}
+              >
+                <Text style={[styles.filterChipText, filterPriority === pr && { color: Colors.background }]}>
+                  {pr}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 3. Lọc Danh mục */}
+          <Text style={styles.filterSubLabel}>CATEGORY //:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScrollFilter}>
+            <TouchableOpacity
+              style={[styles.filterChip, filterCategoryId === 'ALL' && styles.filterChipActive, { marginRight: 6 }]}
+              onPress={() => setFilterCategoryId('ALL')}
+            >
+              <Text style={[styles.filterChipText, filterCategoryId === 'ALL' && { color: Colors.background }]}>ALL</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterChip, filterCategoryId === 'ROOT' && styles.filterChipActive, { marginRight: 6 }]}
+              onPress={() => setFilterCategoryId('ROOT')}
+            >
+              <Text style={[styles.filterChipText, filterCategoryId === 'ROOT' && { color: Colors.background }]}>[ ROOT ]</Text>
+            </TouchableOpacity>
+
+            {categoriesList.map((cat) => (
+              <TouchableOpacity
+                key={cat.id}
+                style={[
+                  styles.filterChip, 
+                  filterCategoryId === cat.id && styles.filterChipActive,
+                  { borderColor: cat.color || Colors.primary, marginRight: 6 }
+                ]}
+                onPress={() => setFilterCategoryId(cat.id)}
+              >
+                <Text style={[
+                  styles.filterChipText, 
+                  filterCategoryId === cat.id ? { color: Colors.background } : { color: cat.color || Colors.primary }
+                ]}>
+                  {cat.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
       )}
 
+      {/* DANH SÁCH CÔNG VIỆC SAU KHI LỌC */}
+      {loading && tasks.length === 0 ? (
+        <ActivityIndicator color={Colors.primary} size="large" />
+      ) : (
+        <FlatList 
+          data={processedTasks} 
+          keyExtractor={(item) => item.id} 
+          renderItem={({ item }) => <TaskItem task={item} onToggle={handleToggle} onDelete={handleDelete} />} 
+          contentContainerStyle={{ paddingBottom: 100 }} 
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>NO_NODES_MATCHED_QUERY //</Text>
+              {isFilterActive && (
+                <TouchableOpacity onPress={handleResetFilters} style={styles.emptyResetBtn}>
+                  <Text style={styles.emptyResetText}>[ CLEAR_FILTERS ]</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+        />
+      )}
+
+      {/* NÚT THÊM TASK NỔI */}
       <View style={styles.fabContainer}>
         <CustomButton title="ADD_NEW_NODE" onPress={() => setModalVisible(true)} />
       </View>
 
-      {/* --- SLIDE-IN DRAWER TỪ PHẢI QUA --- */}
+      {/* DRAWER BÊN PHẢI */}
       {isDrawerOpen && (
         <View style={styles.drawerOverlay}>
-          {/* Vùng bấm bên trái để đóng drawer */}
           <TouchableOpacity style={styles.drawerBackdrop} onPress={() => setDrawerOpen(false)} />
-          
-          {/* Nội dung Drawer trượt ra từ phải */}
           <View style={styles.drawerContainer}>
             <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>SYSTEM_NAV //</Text>
+              <Text style={styles.drawerTitle}>SYSTEM_CONTROL //</Text>
               <TouchableOpacity onPress={() => setDrawerOpen(false)}>
                 <Text style={styles.closeText}>[ X ]</Text>
               </TouchableOpacity>
             </View>
 
-            <View style={styles.drawerLinks}>
+            <ScrollView style={styles.drawerLinks}>
               <TouchableOpacity 
                 style={styles.drawerItem} 
                 onPress={() => { setDrawerOpen(false); router.push('/calendar' as any); }}
               >
                 <Text style={styles.drawerLinkText}>&gt; TIMELINE_</Text>
+              </TouchableOpacity>
+
+              {/* NÚT VÀO CHẾ ĐỘ TẬP TRUNG (MỚI) */}
+              <TouchableOpacity 
+                style={styles.drawerItem} 
+                onPress={() => { setDrawerOpen(false); router.push('/focus' as any); }}
+              >
+                <Text style={[styles.drawerLinkText, { color: Colors.white }]}>&gt; FOCUS_MODE_</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.drawerItem} 
+                onPress={() => { setDrawerOpen(false); router.push('/analytics' as any); }}
+              >
+                <Text style={[styles.drawerLinkText, { color: Colors.glitchCyan }]}>&gt; TELEMETRY_STATS_</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
@@ -166,20 +422,52 @@ const sortedTasks = [...tasks].sort((a, b) => {
                 <Text style={[styles.drawerLinkText, { color: Colors.glitchMagenta }]}>&gt; CATEGORIES_</Text>
               </TouchableOpacity>
 
+              {/* BẢNG CẤU HÌNH HỆ THỐNG THÔNG BÁO */}
+              <View style={styles.configBox}>
+                <Text style={styles.configHeading}>ALERT_SYSTEM //:</Text>
+
+                <TouchableOpacity 
+                  style={[styles.configToggleBtn, notificationsEnabled && styles.configToggleBtnActive]} 
+                  onPress={() => dispatch(toggleNotifications())}
+                >
+                  <Text style={[styles.configToggleText, notificationsEnabled && { color: Colors.background }]}>
+                    STATUS: [ {notificationsEnabled ? 'ACTIVE' : 'MUTED'} ]
+                  </Text>
+                </TouchableOpacity>
+
+                <Text style={[styles.label, { marginTop: 15, fontSize: 11 }]}>DEFAULT_OFFSET //:</Text>
+                <View style={styles.row}>
+                  {[15, 30, 60].map((mins) => (
+                    <TouchableOpacity
+                      key={mins}
+                      style={[styles.offsetBtn, defaultOffsetMinutes === mins && styles.offsetBtnActive]}
+                      onPress={() => dispatch(setDefaultOffset(mins))}
+                    >
+                      <Text style={[styles.offsetText, defaultOffsetMinutes === mins && { color: Colors.background }]}>
+                        {mins}M
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity style={styles.testBtn} onPress={handleTestAlert}>
+                  <Text style={styles.testBtnText}>&gt; TEST_ALERT_SIGNAL</Text>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity 
-                style={[styles.drawerItem, { borderBottomWidth: 0, marginTop: 20 }]} 
+                style={[styles.drawerItem, { borderBottomWidth: 0, marginTop: 25 }]} 
                 onPress={handleLogout}
               >
                 <Text style={[styles.drawerLinkText, { color: Colors.danger }]}>&gt; DISCONNECT_</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </View>
       )}
 
-      {/* POPUP THÊM MỚI TASK (Giữ nguyên) */}
+      {/* POPUP THÊM MỚI TASK */}
       <Modal visible={isModalVisible} transparent={true} animationType="fade">
-        {/* ... (Modal code giữ nguyên như trước) ... */}
         <View style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={styles.scrollModal} keyboardShouldPersistTaps="handled">
             <View style={styles.modalContent}>
@@ -187,30 +475,93 @@ const sortedTasks = [...tasks].sort((a, b) => {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>TITLE //:</Text>
-                <TextInput style={styles.input} value={newTask.title} onChangeText={(t) => setNewTask({...newTask, title: t})} placeholder="Nhập tiêu đề..." placeholderTextColor={Colors.textLight} />
+                <TextInput 
+                  style={styles.input} 
+                  value={newTask.title} 
+                  onChangeText={(t) => setNewTask({...newTask, title: t})} 
+                  placeholder="Nhập tiêu đề..." 
+                  placeholderTextColor={Colors.textLight} 
+                />
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>DESCRIPTION //:</Text>
-                <TextInput style={[styles.input, { height: 100, textAlignVertical: 'top' }]} value={newTask.description} onChangeText={(t) => setNewTask({...newTask, description: t})} placeholder="Nhập mô tả..." placeholderTextColor={Colors.textLight} multiline />
+                <TextInput 
+                  style={[styles.input, { height: 90, textAlignVertical: 'top' }]} 
+                  value={newTask.description} 
+                  onChangeText={(t) => setNewTask({...newTask, description: t})} 
+                  placeholder="Nhập mô tả..." 
+                  placeholderTextColor={Colors.textLight} 
+                  multiline 
+                />
               </View>
 
+              {/* DROPDOWN CHỌN DANH MỤC (HỖ TRỢ CUỘN TOÀN BỘ DANH SÁCH) */}
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>CATEGORY //:</Text>
-                <TextInput style={styles.input} value={selectedCatName} editable={false} />
-                {/* Có thể giữ nguyên phần dropdown chọn cat cũ ở đây */}
+                <TouchableOpacity 
+                  style={styles.dropdownBtn} 
+                  onPress={() => setShowCatDropdown(!showCatDropdown)}
+                >
+                  <Text style={styles.dropdownBtnText}>{selectedCatName}</Text>
+                  <Text style={styles.dropdownBtnText}>{showCatDropdown ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+                
+                {showCatDropdown && (
+                  <ScrollView 
+                    style={styles.dropdownMenu} 
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                  >
+                    <TouchableOpacity 
+                      style={styles.dropdownItem} 
+                      onPress={() => { 
+                        setNewTask({...newTask, categoryId: null}); 
+                        setShowCatDropdown(false); 
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>[ ROOT ]</Text>
+                    </TouchableOpacity>
+
+                    {categoriesList.map(cat => (
+                      <TouchableOpacity 
+                        key={cat.id} 
+                        style={styles.dropdownItem} 
+                        onPress={() => { 
+                          setNewTask({...newTask, categoryId: cat.id}); 
+                          setShowCatDropdown(false); 
+                        }}
+                      >
+                        <View style={styles.dropdownItemRow}>
+                          <View style={[styles.catDot, { backgroundColor: cat.color || Colors.primary }]} />
+                          <Text style={styles.dropdownItemText}>{cat.name}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>TAGS //:</Text>
-                <TextInput style={styles.input} value={newTask.tags} onChangeText={(t) => setNewTask({...newTask, tags: t})} placeholder="frontend, bug..." placeholderTextColor={Colors.textLight} />
+                <TextInput 
+                  style={styles.input} 
+                  value={newTask.tags} 
+                  onChangeText={(t) => setNewTask({...newTask, tags: t})} 
+                  placeholder="frontend, bug, v1.0..." 
+                  placeholderTextColor={Colors.textLight} 
+                />
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>PRIORITY //:</Text>
                 <View style={styles.row}>
                   {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
-                    <TouchableOpacity key={p} style={[styles.priorityBtn, newTask.priority === p && styles.priorityBtnActive]} onPress={() => setNewTask({...newTask, priority: p})}>
+                    <TouchableOpacity 
+                      key={p} 
+                      style={[styles.priorityBtn, newTask.priority === p && styles.priorityBtnActive]} 
+                      onPress={() => setNewTask({...newTask, priority: p})}
+                    >
                       <Text style={[styles.priorityText, newTask.priority === p && { color: Colors.background }]}>{p}</Text>
                     </TouchableOpacity>
                   ))}
@@ -218,11 +569,42 @@ const sortedTasks = [...tasks].sort((a, b) => {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>DEADLINE //:</Text>
+                <Text style={styles.label}>DEADLINE (HẠN CHÓT) //:</Text>
                 {Platform.OS === 'web' ? (
-                  <input type="date" value={newTask.dueDate} onChange={(e) => setNewTask({...newTask, dueDate: e.target.value})} style={webInputStyle} />
+                  <input 
+                    type="date" 
+                    value={newTask.dueDate} 
+                    onChange={(e) => setNewTask({...newTask, dueDate: e.target.value})} 
+                    style={webInputStyle} 
+                  />
                 ) : (
-                  <TextInput style={styles.input} value={newTask.dueDate} onChangeText={(t) => setNewTask({...newTask, dueDate: t})} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textLight} />
+                  <TextInput 
+                    style={styles.input} 
+                    value={newTask.dueDate} 
+                    onChangeText={(t) => setNewTask({...newTask, dueDate: t})} 
+                    placeholder="YYYY-MM-DD" 
+                    placeholderTextColor={Colors.textLight} 
+                  />
+                )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>REMINDER_TIMESTAMP (GIỜ NHẮC) //:</Text>
+                {Platform.OS === 'web' ? (
+                  <input 
+                    type="datetime-local" 
+                    value={newTask.reminderTime} 
+                    onChange={(e) => setNewTask({...newTask, reminderTime: e.target.value})} 
+                    style={webInputStyle} 
+                  />
+                ) : (
+                  <TextInput 
+                    style={styles.input} 
+                    value={newTask.reminderTime} 
+                    onChangeText={(t) => setNewTask({...newTask, reminderTime: t})} 
+                    placeholder="YYYY-MM-DDTHH:mm" 
+                    placeholderTextColor={Colors.textLight} 
+                  />
                 )}
               </View>
 
@@ -234,7 +616,6 @@ const sortedTasks = [...tasks].sort((a, b) => {
                   <CustomButton title="EXECUTE" onPress={handleExecuteInsert} loading={loading} />
                 </View>
               </View>
-              
             </View>
           </ScrollView>
         </View>
@@ -243,95 +624,275 @@ const sortedTasks = [...tasks].sort((a, b) => {
   );
 }
 
-const webInputStyle = { backgroundColor: Colors.background, color: Colors.white, padding: '15px', border: `1px solid ${Colors.border}`, fontFamily: 'monospace', width: '100%', boxSizing: 'border-box', outline: 'none', colorScheme: 'dark' } as any;
+const webInputStyle = { 
+  backgroundColor: Colors.background, 
+  color: Colors.white, 
+  padding: '12px', 
+  border: `1px solid ${Colors.border}`, 
+  fontFamily: 'monospace', 
+  width: '100%', 
+  boxSizing: 'border-box', 
+  outline: 'none', 
+  colorScheme: 'dark' 
+} as any;
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: Colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  
-  // Style nút mở Drawer
-  menuToggleBtn: { paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: Colors.primary, backgroundColor: Colors.surface },
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 15 
+  },
+  headerTitleWrapper: { flex: 1, alignItems: 'flex-start' },
+  menuToggleBtn: { 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
+    borderWidth: 1, 
+    borderColor: Colors.primary, 
+    backgroundColor: Colors.surface, 
+    height: 40, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   menuToggleText: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
 
-  // Styles cho Slide-in Drawer từ phải qua
-  drawerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    zIndex: 1000,
-    flexDirection: 'row',
+  // Thanh tìm kiếm
+  searchContainer: {
+    position: 'relative',
+    marginBottom: 15,
   },
-  drawerBackdrop: {
-    flex: 1, // Chiếm phần màn hình trống bên trái
-  },
-  drawerContainer: {
-    width: '280px' as any, // Chiều rộng drawer trên web/mobile
-    maxWidth: '80%',
+  searchInput: {
     backgroundColor: Colors.surface,
-    borderLeftWidth: 2,
-    borderColor: Colors.primary,
-    padding: 20,
-    paddingTop: 50,
-    height: '100%',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: -5, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 15,
+    color: Colors.white,
+    padding: 12,
+    paddingRight: 40,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    fontFamily: 'monospace',
+    fontSize: 13,
   },
-  drawerHeader: {
+  searchClearBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+  },
+  searchClearText: {
+    color: Colors.danger,
+    fontFamily: 'monospace',
+    fontWeight: 'bold',
+  },
+
+  // Toolbar
+  toolbar: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 12, 
+    paddingBottom: 10, 
+    borderBottomWidth: 1, 
+    borderBottomColor: Colors.border 
+  },
+  toolbarLeft: { flexDirection: 'row', alignItems: 'center' },
+  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12 },
+  filterToggleBtn: {
+    marginLeft: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  filterToggleBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterToggleText: {
+    color: Colors.primary,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  sortBtn: { 
+    backgroundColor: Colors.surface, 
+    paddingHorizontal: 8, 
+    paddingVertical: 4, 
+    borderWidth: 1, 
+    borderColor: Colors.border 
+  },
+  sortText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 11 },
+
+  // Bảng Filter Ma trận
+  filterMatrixCard: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    padding: 14,
+    marginBottom: 15,
+  },
+  filterMatrixHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 30,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingBottom: 15,
-  },
-  drawerTitle: {
-    color: Colors.primary,
-    fontFamily: 'monospace',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  closeText: {
-    color: Colors.danger,
-    fontFamily: 'monospace',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  drawerLinks: {
-    flex: 1,
-  },
-  drawerItem: {
-    paddingVertical: 15,
+    marginBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#222',
+    paddingBottom: 6,
   },
-  drawerLinkText: {
-    color: Colors.primary,
+  filterMatrixTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+  resetFilterText: { color: Colors.danger, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+  filterSubLabel: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 5, marginTop: 6 },
+  filterRow: { flexDirection: 'row', marginBottom: 6 },
+  filterChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+    marginRight: 6,
+  },
+  filterChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterChipText: {
+    color: Colors.white,
     fontFamily: 'monospace',
-    fontSize: 16,
+    fontSize: 10,
     fontWeight: 'bold',
   },
+  categoryScrollFilter: { flexDirection: 'row', marginTop: 4, marginBottom: 4 },
 
-  toolbar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  sortBtn: { backgroundColor: Colors.surface, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: Colors.primary },
-  sortText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12 },
   fabContainer: { position: 'absolute', bottom: 30, left: 20, right: 20 },
-  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 5 },
-  
+
+  // Drawer
+  drawerOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    backgroundColor: 'rgba(0,0,0,0.75)', 
+    zIndex: 1000, 
+    flexDirection: 'row' 
+  },
+  drawerBackdrop: { flex: 1 },
+  drawerContainer: { 
+    width: '300px' as any, 
+    maxWidth: '85%', 
+    backgroundColor: Colors.surface, 
+    borderLeftWidth: 2, 
+    borderColor: Colors.primary, 
+    padding: 20, 
+    paddingTop: 50, 
+    height: '100%' 
+  },
+  drawerHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 20, 
+    borderBottomWidth: 1, 
+    borderBottomColor: Colors.border, 
+    paddingBottom: 15 
+  },
+  drawerTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
+  closeText: { color: Colors.danger, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
+  drawerLinks: { flex: 1 },
+  drawerItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222' },
+  drawerLinkText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 15, fontWeight: 'bold' },
+
+  // Cấu hình Alert trong Drawer
+  configBox: { 
+    marginTop: 25, 
+    padding: 12, 
+    borderWidth: 1, 
+    borderColor: Colors.border, 
+    backgroundColor: Colors.background 
+  },
+  configHeading: { color: Colors.primary, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
+  configToggleBtn: { padding: 10, borderWidth: 1, borderColor: Colors.primary, alignItems: 'center', backgroundColor: 'transparent' },
+  configToggleBtnActive: { backgroundColor: Colors.primary },
+  configToggleText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+  offsetBtn: { flex: 1, padding: 8, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
+  offsetBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  offsetText: { color: Colors.white, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+  testBtn: { marginTop: 15, padding: 8, borderWidth: 1, borderColor: Colors.glitchCyan, alignItems: 'center' },
+  testBtnText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+
+  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center' },
   scrollModal: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: Colors.surface, padding: 20, borderWidth: 1, borderColor: Colors.primary, shadowColor: Colors.primary, shadowOpacity: 0.5, shadowRadius: 10 },
-  modalHeader: { color: Colors.white, fontSize: 18, fontFamily: 'monospace', fontWeight: 'bold', marginBottom: 20, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: Colors.textLight, paddingBottom: 10 },
+  modalContent: { 
+    backgroundColor: Colors.surface, 
+    padding: 20, 
+    borderWidth: 1, 
+    borderColor: Colors.primary, 
+    shadowColor: Colors.primary, 
+    shadowOpacity: 0.5, 
+    shadowRadius: 10 
+  },
+  modalHeader: { 
+    color: Colors.white, 
+    fontSize: 18, 
+    fontFamily: 'monospace', 
+    fontWeight: 'bold', 
+    marginBottom: 20, 
+    textAlign: 'center', 
+    borderBottomWidth: 1, 
+    borderBottomColor: Colors.textLight, 
+    paddingBottom: 10 
+  },
   inputGroup: { marginBottom: 15 },
-  input: { backgroundColor: Colors.background, color: Colors.white, padding: 15, borderWidth: 1, borderColor: Colors.border, fontFamily: 'monospace' },
+  input: { 
+    backgroundColor: Colors.background, 
+    color: Colors.white, 
+    padding: 12, 
+    borderWidth: 1, 
+    borderColor: Colors.border, 
+    fontFamily: 'monospace' 
+  },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
-  priorityBtn: { flex: 1, padding: 15, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
+  priorityBtn: { flex: 1, padding: 12, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
   priorityBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   priorityText: { color: Colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
-  modalActions: { flexDirection: 'row', marginTop: 10 }
+  modalActions: { flexDirection: 'row', marginTop: 15 },
+
+  // Dropdown
+  dropdownBtn: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    backgroundColor: Colors.background, 
+    padding: 12, 
+    borderWidth: 1, 
+    borderColor: Colors.border 
+  },
+  dropdownBtnText: { color: Colors.white, fontFamily: 'monospace' },
+  dropdownMenu: { 
+    backgroundColor: Colors.surface, 
+    borderWidth: 1, 
+    borderColor: Colors.border, 
+    borderTopWidth: 0, 
+    maxHeight: 180, // Tăng chiều cao và cho phép cuộn bên trong
+  },
+  dropdownItem: { 
+    padding: 12, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#222' 
+  },
+  dropdownItemRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  catDot: { 
+    width: 8, 
+    height: 8, 
+    marginRight: 10 
+  },
+  dropdownItemText: { color: Colors.primary, fontFamily: 'monospace' },
+
+  emptyContainer: { alignItems: 'center', marginTop: 50 },
+  emptyText: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 13 },
+  emptyResetBtn: { marginTop: 15, padding: 8, borderWidth: 1, borderColor: Colors.primary },
+  emptyResetText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12 }
 });
