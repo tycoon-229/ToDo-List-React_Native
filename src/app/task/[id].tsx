@@ -1,19 +1,25 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { useAppSelector, useAppDispatch } from '../../store/hooks';
-import { toggleTaskStatus, updateTask } from '../../features/tasksSlice';
-import { setSubtasks, addSubtask, toggleSubtaskStatus, deleteSubtask } from '../../features/subtasksSlice';
-import { supabase } from '../../services/supabase';
-import GlitchText from '../../components/GlitchText';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CustomButton from '../../components/CustomButton';
-import Colors from '../../constants/Colors';
+import GlitchText from '../../components/GlitchText';
+import { ColorPalette } from '../../constants/Colors';
+import { addSubtask, deleteSubtask, setSubtasks, toggleSubtaskStatus } from '../../features/subtasksSlice';
+import { toggleTaskStatus, updateTask } from '../../features/tasksSlice';
+import { useThemeColors } from '../../hooks/useThemeColors';
+import { useTranslation } from '../../hooks/useTranslation';
+import { supabase } from '../../services/supabase';
+import { useAppDispatch, useAppSelector } from '../../store/hooks';
 
 export default function TaskDetailView() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const dispatch = useAppDispatch();
+  const colors = useThemeColors();
+  const t = useTranslation();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+  const isDark = colors.background === '#0D0D0D';
 
-  const task = useAppSelector(state => state.tasks.tasksList.find(t => t.id === id));
+  const task = useAppSelector(state => state.tasks.tasksList.find(tItem => tItem.id === id));
   const categoriesList = useAppSelector(state => state.categories.list);
   const allSubtasks = useAppSelector(state => state.subtasks.list);
 
@@ -41,18 +47,17 @@ export default function TaskDetailView() {
   if (!task) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.white, fontFamily: 'monospace' }}>SYS_ERR: Node không tồn tại hoặc đã bị xóa.</Text>
+        <Text style={{ color: colors.white, fontFamily: 'monospace' }}>SYS_ERR: Node không tồn tại hoặc đã bị xóa.</Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={styles.link}>{'< SYS_HOME'}</Text>
+          <Text style={styles.link}>{t.backHome}</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   const isCompleted = task.status === 'COMPLETED';
-  const priorityColor = task.priority === 'HIGH' ? Colors.danger : (task.priority === 'MEDIUM' ? '#FFFF00' : Colors.glitchCyan);
+  const priorityColor = task.priority === 'HIGH' ? colors.danger : (task.priority === 'MEDIUM' ? '#FFAE00' : colors.glitchCyan);
 
-  // Đổi trạng thái task chính
   const handleToggleMainTask = async () => {
     if (task.status === 'TODO' && task.recurrence && task.recurrence !== 'NONE') {
       const baseDate = task.due_date ? new Date(task.due_date) : new Date();
@@ -85,7 +90,6 @@ export default function TaskDetailView() {
     await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id);
   };
 
-  // Thao tác với Subtasks
   const handleAddSubtask = async () => {
     if (!newSubtaskTitle.trim()) return;
     setSubLoading(true);
@@ -115,60 +119,58 @@ export default function TaskDetailView() {
   const completedSubtasksCount = subtasks.filter(s => s.is_completed).length;
   const subtaskProgress = subtasks.length > 0 ? Math.round((completedSubtasksCount / subtasks.length) * 100) : 0;
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/' as any);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* HEADER ĐIỀU HƯỚNG & NÚT EDIT */}
       <View style={styles.navHeader}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.link}>{'< SYS_HOME'}</Text>
+        <TouchableOpacity onPress={handleBack}>
+          <Text style={styles.link}>{t.backHome}</Text>
         </TouchableOpacity>
 
         <GlitchText text="TASK_INTEL" fontSize={26} />
-
+        
         <TouchableOpacity 
           style={styles.editBtn} 
           onPress={() => router.push(`/edit/${task.id}` as any)}
         >
-          <Text style={styles.editBtnText}>[ EDIT_NODE ]</Text>
+          <Text style={styles.editBtnText}>[ {t.editNode} ]</Text>
         </TouchableOpacity>
       </View>
-      
-      {/* THẺ TRẠNG THÁI CHÍNH */}
+
       <View style={styles.panelCard}>
         <View style={styles.statusRow}>
-          <Text style={styles.metaLabel}>NODE_STATUS //:</Text>
+          <Text style={styles.metaLabel}>{t.status}</Text>
           <TouchableOpacity 
             style={[styles.statusBadge, isCompleted ? styles.statusCompleted : styles.statusPending]}
             onPress={handleToggleMainTask}
           >
-            <Text style={[styles.statusText, isCompleted ? { color: Colors.primary } : { color: '#FFFF00' }]}>
+            <Text style={[styles.statusText, isCompleted ? { color: colors.primary } : { color: '#FFAE00' }]}>
               {isCompleted ? '[ COMPLETED ✓ ]' : '[ IN_PROGRESS ⧗ ]'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* NÚT KÍCH HOẠT FOCUS TRỰC TIẾP CHO TASK NÀY (MỚI) */}
         {!isCompleted && (
           <TouchableOpacity 
-            style={{ 
-              marginBottom: 12, 
-              paddingVertical: 8, 
-              borderWidth: 1, 
-              borderColor: Colors.primary, 
-              backgroundColor: 'rgba(0, 255, 65, 0.05)',
-              alignItems: 'center' 
-            }}
+            style={styles.focusLaunchBtn}
             onPress={() => router.push({ pathname: '/focus', params: { taskId: task.id } } as any)}
           >
-            <Text style={{ color: Colors.primary, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' }}>
-              &gt; START_FOCUS_TIMER_FOR_THIS_NODE &lt;
+            <Text style={styles.focusLaunchText}>
+              &gt; {t.focusMode} &lt;
             </Text>
           </TouchableOpacity>
         )}
 
         <Text style={styles.taskTitle}>{task.title}</Text>
 
-        <Text style={styles.metaLabel}>DESCRIPTION //:</Text>
+        <Text style={styles.metaLabel}>{t.description}</Text>
         <View style={styles.descBox}>
           <Text style={styles.descText}>
             {task.description ? task.description : 'NO_DESCRIPTION_ATTACHED //'}
@@ -176,16 +178,15 @@ export default function TaskDetailView() {
         </View>
       </View>
 
-      {/* THÔNG SỐ SIÊU DỮ LIỆU (METADATA HUD) */}
       <View style={styles.gridRow}>
         <View style={styles.hudCard}>
-          <Text style={styles.hudLabel}>PRIORITY</Text>
+          <Text style={styles.hudLabel}>{t.priority.replace(' //:', '')}</Text>
           <Text style={[styles.hudValue, { color: priorityColor }]}>[{task.priority}]</Text>
         </View>
 
         <View style={styles.hudCard}>
-          <Text style={styles.hudLabel}>CATEGORY</Text>
-          <Text style={[styles.hudValue, { color: category?.color || Colors.primary }]}>
+          <Text style={styles.hudLabel}>{t.category.replace(' //:', '')}</Text>
+          <Text style={[styles.hudValue, { color: category?.color || colors.primary }]}>
             {category ? category.name : '[ ROOT ]'}
           </Text>
         </View>
@@ -193,27 +194,27 @@ export default function TaskDetailView() {
 
       <View style={styles.gridRow}>
         <View style={styles.hudCard}>
-          <Text style={styles.hudLabel}>DEADLINE</Text>
+          <Text style={styles.hudLabel}>{t.deadline.replace(' //:', '')}</Text>
           <Text style={styles.hudValue}>{task.due_date || 'NONE'}</Text>
         </View>
 
         <View style={styles.hudCard}>
-          <Text style={styles.hudLabel}>REMINDER</Text>
+          <Text style={styles.hudLabel}>{t.reminder.replace(' //:', '')}</Text>
           <Text style={styles.hudValue}>{task.reminder_time ? task.reminder_time.replace('T', ' ') : 'MUTED'}</Text>
         </View>
       </View>
 
       <View style={styles.gridRow}>
         <View style={styles.hudCard}>
-          <Text style={styles.hudLabel}>RECURRENCE</Text>
-          <Text style={[styles.hudValue, { color: '#ffae00' }]}>
+          <Text style={styles.hudLabel}>{t.recurrence.replace(' //:', '')}</Text>
+          <Text style={[styles.hudValue, { color: '#FFAE00' }]}>
             {task.recurrence && task.recurrence !== 'NONE' ? `[ ${task.recurrence} ]` : 'NONE'}
           </Text>
         </View>
 
         <View style={styles.hudCard}>
           <Text style={styles.hudLabel}>STREAK_RECORD</Text>
-          <Text style={[styles.hudValue, { color: '#ffae00' }]}>
+          <Text style={[styles.hudValue, { color: colors.primary }]}>
             🔥 {task.streak || 0} CYCLES
           </Text>
         </View>
@@ -221,7 +222,7 @@ export default function TaskDetailView() {
 
       {task.tags ? (
         <View style={styles.tagsContainer}>
-          <Text style={styles.metaLabel}>TAGS //:</Text>
+          <Text style={styles.metaLabel}>{t.tags}</Text>
           <View style={styles.tagWrap}>
             {task.tags.split(',').map((tag, i) => (
               <View key={i} style={styles.tagChip}>
@@ -232,28 +233,25 @@ export default function TaskDetailView() {
         </View>
       ) : null}
 
-      {/* KHỐI SUBTASK CHECKLIST */}
       <View style={styles.checklistCard}>
         <View style={styles.checklistHeader}>
-          <Text style={styles.sectionTitle}>SUBTASKS_PROTOCOL //</Text>
+          <Text style={styles.sectionTitle}>{t.subtasksProtocol}</Text>
           <Text style={styles.progressText}>
             {completedSubtasksCount}/{subtasks.length} ({subtaskProgress}%)
           </Text>
         </View>
 
-        {/* Thanh Gauge Bar tiến độ Subtask */}
         <View style={styles.progressBarTrack}>
           <View style={[styles.progressBarFill, { width: `${subtaskProgress}%` }]} />
         </View>
 
-        {/* Ô thêm Subtask nhanh ngay tại trang chi tiết */}
         <View style={styles.subtaskInputRow}>
           <TextInput
             style={styles.subtaskInput}
             value={newSubtaskTitle}
             onChangeText={setNewSubtaskTitle}
-            placeholder="Thêm node con mới..."
-            placeholderTextColor={Colors.white}
+            placeholder={t.addSubtaskPlaceholder}
+            placeholderTextColor={colors.textLight}
             onSubmitEditing={handleAddSubtask}
           />
           <TouchableOpacity style={styles.subtaskAddBtn} onPress={handleAddSubtask} disabled={subLoading}>
@@ -261,7 +259,6 @@ export default function TaskDetailView() {
           </TouchableOpacity>
         </View>
 
-        {/* Danh sách Subtasks */}
         {subtasks.length === 0 ? (
           <Text style={styles.emptySubText}>CHƯA CÓ SUBTASK NÀO ĐƯỢC THIẾT LẬP //</Text>
         ) : (
@@ -288,63 +285,104 @@ export default function TaskDetailView() {
       </View>
 
       <CustomButton 
-        title="MODIFY_NODE_DATA" 
+        title={t.modifyNode} 
         onPress={() => router.push(`/edit/${task.id}` as any)} 
       />
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 50 },
-  navHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  link: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
-  editBtn: { borderWidth: 1, borderColor: Colors.glitchCyan, paddingHorizontal: 10, paddingVertical: 5 },
-  editBtnText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+const getStyles = (colors: ColorPalette) => {
+  const isDark = colors.background === '#0D0D0D';
 
-  panelCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, padding: 16, marginBottom: 15 },
-  statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  statusBadge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
-  statusCompleted: { borderColor: Colors.primary, backgroundColor: 'rgba(0, 255, 65, 0.1)' },
-  statusPending: { borderColor: '#FFFF00', backgroundColor: 'rgba(255, 255, 0, 0.1)' },
-  statusText: { fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 50 },
+    navHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+    link: { color: colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
+    editBtn: { 
+      borderWidth: 2, 
+      borderColor: colors.primary, 
+      paddingHorizontal: 12, 
+      paddingVertical: 6,
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary,
+    },
+    editBtnText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 12, 
+      fontWeight: 'bold' 
+    },
 
-  taskTitle: { color: Colors.white, fontFamily: 'monospace', fontSize: 20, fontWeight: '900', marginBottom: 15 },
-  metaLabel: { color: Colors.primary, fontFamily: 'monospace', fontSize: 11, marginBottom: 6 },
-  descBox: { backgroundColor: Colors.background, borderWidth: 1, borderColor: '#262626', padding: 12 },
-  descText: { color: '#E0E0E0', fontFamily: 'monospace', fontSize: 13, lineHeight: 20 },
+    panelCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 15 },
+    statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    statusBadge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
+    statusCompleted: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 65, 0.1)' },
+    statusPending: { borderColor: '#FFAE00', backgroundColor: 'rgba(255, 174, 0, 0.1)' },
+    statusText: { fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
 
-  gridRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  hudCard: { flex: 1, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, padding: 12, marginHorizontal: 3 },
-  hudLabel: { color: Colors.white, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
-  hudValue: { color: Colors.white, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold' },
+    focusLaunchBtn: {
+      marginBottom: 12,
+      paddingVertical: 8,
+      borderWidth: 2,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary,
+      alignItems: 'center'
+    },
+    focusLaunchText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 11, 
+      fontWeight: 'bold' 
+    },
 
-  tagsContainer: { marginBottom: 15 },
-  tagWrap: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4 },
-  tagChip: { borderWidth: 1, borderColor: Colors.glitchMagenta, paddingHorizontal: 8, paddingVertical: 3, marginRight: 6, marginBottom: 6 },
-  tagChipText: { color: Colors.glitchMagenta, fontFamily: 'monospace', fontSize: 11 },
+    taskTitle: { color: colors.white, fontFamily: 'monospace', fontSize: 20, fontWeight: '900', marginBottom: 15 },
+    metaLabel: { color: colors.textLight, fontFamily: 'monospace', fontSize: 11, marginBottom: 6 },
+    descBox: { backgroundColor: colors.inputBg, borderWidth: 1, borderColor: colors.border, padding: 12 },
+    descText: { color: colors.white, fontFamily: 'monospace', fontSize: 13, lineHeight: 20 },
 
-  // Checklist
-  checklistCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, padding: 16, marginBottom: 20 },
-  checklistHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  sectionTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold' },
-  progressText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
-  progressBarTrack: { height: 8, backgroundColor: Colors.background, borderWidth: 1, borderColor: '#333', marginBottom: 15 },
-  progressBarFill: { height: '100%', backgroundColor: Colors.primary },
+    gridRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+    hudCard: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 12, marginHorizontal: 3 },
+    hudLabel: { color: colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
+    hudValue: { color: colors.white, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold' },
 
-  subtaskInputRow: { flexDirection: 'row', marginBottom: 15 },
-  subtaskInput: { flex: 1, backgroundColor: Colors.background, color: Colors.white, padding: 10, borderWidth: 1, borderColor: Colors.border, fontFamily: 'monospace', fontSize: 12 },
-  subtaskAddBtn: { backgroundColor: Colors.primary, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center' },
-  subtaskAddBtnText: { color: Colors.background, fontFamily: 'monospace', fontWeight: 'bold', fontSize: 12 },
+    tagsContainer: { marginBottom: 15 },
+    tagWrap: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4 },
+    tagChip: { borderWidth: 1, borderColor: colors.glitchMagenta, paddingHorizontal: 8, paddingVertical: 3, marginRight: 6, marginBottom: 6 },
+    tagChipText: { color: colors.glitchMagenta, fontFamily: 'monospace', fontSize: 11 },
 
-  emptySubText: { color: Colors.white, fontFamily: 'monospace', fontSize: 11, textAlign: 'center', paddingVertical: 10 },
-  subtaskItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#222' },
-  subtaskCheckRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  subtaskBox: { width: 18, height: 18, borderWidth: 1, borderColor: Colors.primary, marginRight: 10, justifyContent: 'center', alignItems: 'center' },
-  subtaskBoxChecked: { borderColor: Colors.white },
-  subtaskInner: { width: 8, height: 8, backgroundColor: Colors.white },
-  subtaskTitle: { color: Colors.white, fontFamily: 'monospace', fontSize: 13, flex: 1 },
-  subtaskTitleDone: { color: Colors.white, textDecorationLine: 'line-through' },
-  subtaskDel: { color: Colors.danger, fontFamily: 'monospace', fontWeight: 'bold', paddingLeft: 10 }
-});
+    checklistCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 20 },
+    checklistHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+    sectionTitle: { color: colors.primary, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold' },
+    progressText: { color: colors.glitchCyan, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+    progressBarTrack: { height: 8, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginBottom: 15 },
+    progressBarFill: { height: '100%', backgroundColor: colors.primary },
+
+    subtaskInputRow: { flexDirection: 'row', marginBottom: 15 },
+    subtaskInput: { flex: 1, backgroundColor: colors.inputBg, color: colors.white, padding: 10, borderWidth: 1, borderColor: colors.border, fontFamily: 'monospace', fontSize: 12 },
+    subtaskAddBtn: { 
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      paddingHorizontal: 14, 
+      justifyContent: 'center', 
+      alignItems: 'center' 
+    },
+    subtaskAddBtnText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontWeight: 'bold', 
+      fontSize: 12 
+    },
+
+    emptySubText: { color: colors.textLight, fontFamily: 'monospace', fontSize: 11, textAlign: 'center', paddingVertical: 10 },
+    subtaskItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+    subtaskCheckRow: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    subtaskBox: { width: 18, height: 18, borderWidth: 1, borderColor: colors.primary, marginRight: 10, justifyContent: 'center', alignItems: 'center' },
+    subtaskBoxChecked: { borderColor: colors.textLight },
+    subtaskInner: { width: 8, height: 8, backgroundColor: colors.primary },
+    subtaskTitle: { color: colors.white, fontFamily: 'monospace', fontSize: 13, flex: 1 },
+    subtaskTitleDone: { color: colors.textLight, textDecorationLine: 'line-through' },
+    subtaskDel: { color: colors.danger, fontFamily: 'monospace', fontWeight: 'bold', paddingLeft: 10 }
+  });
+};

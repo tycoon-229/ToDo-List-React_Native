@@ -1,16 +1,22 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import CustomButton from '../../components/CustomButton';
-import GlitchText from '../../components/GlitchText';
-import Colors from '../../constants/Colors';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { useLocalSearchParams, router } from 'expo-router';
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
 import { updateTask } from '../../features/tasksSlice';
 import { supabase } from '../../services/supabase';
-import { useAppDispatch, useAppSelector } from '../../store/hooks';
+import { useThemeColors } from '../../hooks/useThemeColors';
+import { useTranslation } from '../../hooks/useTranslation';
+import { ColorPalette } from '../../constants/Colors';
+import CustomButton from '../../components/CustomButton';
+import GlitchText from '../../components/GlitchText';
 
 export default function EditTaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const dispatch = useAppDispatch();
+  const colors = useThemeColors();
+  const t = useTranslation();
+  const theme = useAppSelector(state => state.settings.theme);
+  const styles = useMemo(() => getStyles(colors), [colors]);
 
   const task = useAppSelector(state => state.tasks.tasksList.find(t => t.id === id));
   const categoriesList = useAppSelector(state => state.categories.list);
@@ -22,31 +28,30 @@ export default function EditTaskScreen() {
   const [reminderTime, setReminderTime] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [tags, setTags] = useState('');
+  const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('NONE');
   
   const [loading, setLoading] = useState(false);
   const [showCatDropdown, setShowCatDropdown] = useState(false);
 
-  const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('NONE');
-
   useEffect(() => {
-  if (task) {
-    setTitle(task.title || '');
-    setDescription(task.description || '');
-    setPriority(task.priority || 'MEDIUM');
-    setDueDate(task.due_date || '');
-    setReminderTime(task.reminder_time || '');
-    setCategoryId(task.category_id || null);
-    setTags(task.tags || '');
-    setRecurrence(task.recurrence || 'NONE');
-  }
-}, [task]);
+    if (task) {
+      setTitle(task.title || '');
+      setDescription(task.description || '');
+      setPriority(task.priority || 'MEDIUM');
+      setDueDate(task.due_date || '');
+      setReminderTime(task.reminder_time || '');
+      setCategoryId(task.category_id || null);
+      setTags(task.tags || '');
+      setRecurrence(task.recurrence || 'NONE');
+    }
+  }, [task]);
 
   if (!task) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.white, fontFamily: 'monospace' }}>SYS_ERR: Node not found.</Text>
+        <Text style={{ color: colors.white, fontFamily: 'monospace' }}>SYS_ERR: Node not found.</Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={styles.link}>{'< RETURN'}</Text>
+          <Text style={styles.link}>{t.return}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -68,7 +73,7 @@ export default function EditTaskScreen() {
       reminder_time: reminderTime || null,
       category_id: categoryId, 
       tags,
-      recurrence,
+      recurrence
     };
     const reduxData = { 
       title, 
@@ -78,7 +83,7 @@ export default function EditTaskScreen() {
       reminder_time: reminderTime || undefined,
       category_id: categoryId, 
       tags,
-      recurrence,
+      recurrence
     };
 
     const { error } = await supabase.from('tasks').update(supabaseData).eq('id', id);
@@ -100,34 +105,56 @@ export default function EditTaskScreen() {
 
   const selectedCatName = categoryId === null ? '[ ROOT ]' : categoriesList.find(c => c.id === categoryId)?.name || '[ UNKNOWN ]';
 
+  const webInputStyle = { 
+    backgroundColor: colors.inputBg, 
+    color: colors.white, 
+    padding: '12px', 
+    border: `1px solid ${colors.border}`, 
+    fontFamily: 'monospace', 
+    width: '100%', 
+    boxSizing: 'border-box', 
+    outline: 'none', 
+    colorScheme: theme === 'CYBER_DARK' ? 'dark' : 'light' 
+  } as any;
+
+  // Xử lý quay lại an toàn chống rỗng stack lịch sử
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/' as any);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.navHeader}>
-        <TouchableOpacity onPress={() => router.back()} >
-          <Text style={styles.link}>{'< RETURN'}</Text>
-        </TouchableOpacity>
+        <TouchableOpacity onPress={handleBack}>
+        <Text style={styles.link}>{t.return}</Text>
+      </TouchableOpacity>
 
-        <GlitchText text="EDIT_NODE" fontSize={26} />
+      <GlitchText text="EDIT_NODE" fontSize={26} />
+      </View>
+      
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>{t.title}</Text>
+        <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholderTextColor={colors.textLight} />
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>TITLE //:</Text>
-        <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholderTextColor={Colors.textLight} />
-      </View>
-
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>DESCRIPTION //:</Text>
+        <Text style={styles.label}>{t.description}</Text>
         <TextInput 
           style={[styles.input, { height: 90, textAlignVertical: 'top' }]} 
           value={description} 
           onChangeText={setDescription} 
           multiline 
-          placeholderTextColor={Colors.textLight} 
+          placeholderTextColor={colors.textLight} 
         />
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>CATEGORY //:</Text>
+        <Text style={styles.label}>{t.category}</Text>
         <TouchableOpacity style={styles.dropdownBtn} onPress={() => setShowCatDropdown(!showCatDropdown)}>
           <Text style={styles.dropdownBtnText}>{selectedCatName}</Text>
           <Text style={styles.dropdownBtnText}>{showCatDropdown ? '▲' : '▼'}</Text>
@@ -141,7 +168,7 @@ export default function EditTaskScreen() {
             {categoriesList.map(cat => (
               <TouchableOpacity key={cat.id} style={styles.dropdownItem} onPress={() => { setCategoryId(cat.id); setShowCatDropdown(false); }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ width: 8, height: 8, backgroundColor: cat.color || Colors.primary, marginRight: 10 }} />
+                  <View style={{ width: 8, height: 8, backgroundColor: cat.color || colors.primary, marginRight: 10 }} />
                   <Text style={styles.dropdownItemText}>{cat.name}</Text>
                 </View>
               </TouchableOpacity>
@@ -151,23 +178,23 @@ export default function EditTaskScreen() {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>TAGS (Phân cách bằng dấu phẩy) //:</Text>
-        <TextInput style={styles.input} value={tags} onChangeText={setTags} placeholder="frontend, urgent..." placeholderTextColor={Colors.textLight} />
+        <Text style={styles.label}>{t.tags}</Text>
+        <TextInput style={styles.input} value={tags} onChangeText={setTags} placeholder="frontend, urgent..." placeholderTextColor={colors.textLight} />
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>PRIORITY //:</Text>
+        <Text style={styles.label}>{t.priority}</Text>
         <View style={styles.row}>
           {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
             <TouchableOpacity key={p} style={[styles.priorityBtn, priority === p && styles.priorityBtnActive]} onPress={() => setPriority(p)}>
-              <Text style={[styles.priorityText, priority === p && { color: Colors.background }]}>{p}</Text>
+              <Text style={[styles.priorityText, priority === p && { color: colors.background }]}>{p}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>RECURRENCE_PROTOCOL //:</Text>
+        <Text style={styles.label}>{t.recurrence}</Text>
         <View style={styles.row}>
           {(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map(rec => (
             <TouchableOpacity 
@@ -175,7 +202,7 @@ export default function EditTaskScreen() {
               style={[styles.priorityBtn, recurrence === rec && styles.priorityBtnActive]} 
               onPress={() => setRecurrence(rec)}
             >
-              <Text style={[styles.priorityText, recurrence === rec && { color: Colors.background }]}>
+              <Text style={[styles.priorityText, recurrence === rec && { color: colors.background }]}>
                 {rec}
               </Text>
             </TouchableOpacity>
@@ -184,56 +211,61 @@ export default function EditTaskScreen() {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>DEADLINE //:</Text>
+        <Text style={styles.label}>{t.deadline}</Text>
         {Platform.OS === 'web' ? (
           <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={webInputStyle} />
         ) : (
-          <TextInput style={styles.input} value={dueDate} onChangeText={setDueDate} placeholder="YYYY-MM-DD" placeholderTextColor={Colors.textLight} />
+          <TextInput style={styles.input} value={dueDate} onChangeText={setDueDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textLight} />
         )}
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>REMINDER_TIMESTAMP //:</Text>
+        <Text style={styles.label}>{t.reminder}</Text>
         {Platform.OS === 'web' ? (
           <input type="datetime-local" value={reminderTime} onChange={(e) => setReminderTime(e.target.value)} style={webInputStyle} />
         ) : (
-          <TextInput style={styles.input} value={reminderTime} onChangeText={setReminderTime} placeholder="YYYY-MM-DDTHH:mm" placeholderTextColor={Colors.textLight} />
+          <TextInput style={styles.input} value={reminderTime} onChangeText={setReminderTime} placeholder="YYYY-MM-DDTHH:mm" placeholderTextColor={colors.textLight} />
         )}
       </View>
 
-      <CustomButton title="OVERWRITE_DATA" onPress={handleUpdate} loading={loading} />
+      <CustomButton title={t.modifyNode} onPress={handleUpdate} loading={loading} />
       <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
-const webInputStyle = { 
-  backgroundColor: Colors.surface, 
-  color: Colors.white, 
-  padding: '12px', 
-  border: `1px solid ${Colors.border}`, 
-  fontFamily: 'monospace', 
-  width: '100%', 
-  boxSizing: 'border-box', 
-  outline: 'none', 
-  colorScheme: 'dark' 
-} as any;
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 50, backgroundColor: Colors.background },
-  navHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  link: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
+const getStyles = (colors: ColorPalette) => StyleSheet.create({
+  container: { flex: 1, padding: 20, paddingTop: 50, backgroundColor: colors.background },
+  navHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  link: { color: colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
   inputGroup: { marginBottom: 15 },
-  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 13, marginBottom: 5 },
-  input: { backgroundColor: Colors.surface, color: Colors.white, padding: 12, borderWidth: 1, borderColor: Colors.border, fontFamily: 'monospace' },
+  label: { color: colors.primary, fontFamily: 'monospace', fontSize: 13, marginBottom: 5 },
+  input: { backgroundColor: colors.inputBg, color: colors.white, padding: 12, borderWidth: 1, borderColor: colors.border, fontFamily: 'monospace' },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
-  priorityBtn: { flex: 1, padding: 12, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
-  priorityBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  priorityText: { color: Colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
 
-  dropdownBtn: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: Colors.surface, padding: 12, borderWidth: 1, borderColor: Colors.border },
-  dropdownBtnText: { color: Colors.white, fontFamily: 'monospace' },
-  dropdownMenu: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderTopWidth: 0, maxHeight: 160 },
-  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: '#222' },
-  dropdownItemText: { color: Colors.primary, fontFamily: 'monospace' }
+  priorityBtn: { 
+    flex: 1, 
+    padding: 12, 
+    borderWidth: 1.5, 
+    borderColor: colors.border, 
+    alignItems: 'center', 
+    marginHorizontal: 2, 
+    backgroundColor: colors.background === '#0D0D0D' ? '#0D0D0D' : colors.surface 
+  },
+  priorityBtnActive: { 
+    backgroundColor: colors.background === '#0D0D0D' ? '#0D0D0D' : colors.primary, 
+    borderColor: colors.primary 
+  },
+  priorityText: { 
+    color: colors.white, 
+    fontFamily: 'monospace', 
+    fontSize: 12, 
+    fontWeight: 'bold' 
+  },
+
+  dropdownBtn: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: colors.inputBg, padding: 12, borderWidth: 1, borderColor: colors.border },
+  dropdownBtnText: { color: colors.white, fontFamily: 'monospace' },
+  dropdownMenu: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopWidth: 0, maxHeight: 160 },
+  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  dropdownItemText: { color: colors.primary, fontFamily: 'monospace' }
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import { 
   View, 
@@ -11,44 +11,49 @@ import {
   ActivityIndicator, 
   Modal, 
   Platform, 
-  ScrollView 
+  ScrollView,
+  Image
 } from 'react-native';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { setTasks, addTask, toggleTaskStatus, deleteTask } from '../features/tasksSlice';
+import { setTasks, addTask, toggleTaskStatus, softDeleteTask } from '../features/tasksSlice';
 import { setCategories } from '../features/categoriesSlice';
-import { clearSession } from '../features/authSlice';
-import { toggleNotifications, setDefaultOffset } from '../features/settingsSlice';
+import { clearSession, setProfile } from '../features/authSlice';
+import { toggleNotifications, setDefaultOffset, setTheme, setLanguage, setTimezone } from '../features/settingsSlice';
 import { supabase } from '../services/supabase';
 import { requestBrowserPermission, triggerCyborgNotification } from '../services/notificationService';
+import { useThemeColors } from '../hooks/useThemeColors';
+import { useTranslation } from '../hooks/useTranslation';
+import { ColorPalette } from '../constants/Colors';
 import GlitchText from '../components/GlitchText';
 import TaskItem from '../components/TaskItem';
 import CustomButton from '../components/CustomButton';
-import Colors from '../constants/Colors';
 import { setSubtasks } from '../features/subtasksSlice';
 
 export default function Home() {
-  const { user, isAuthenticated } = useAppSelector(state => state.auth);
+  const { user, profile, isAuthenticated } = useAppSelector(state => state.auth);
   const tasks = useAppSelector(state => state.tasks.tasksList);
   const categoriesList = useAppSelector(state => state.categories.list);
-  const { notificationsEnabled, defaultOffsetMinutes } = useAppSelector(state => state.settings);
+  const { notificationsEnabled, defaultOffsetMinutes, theme } = useAppSelector(state => state.settings);
   const dispatch = useAppDispatch();
+
+  const colors = useThemeColors();
+  const t = useTranslation();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+  const isDark = colors.background === '#0D0D0D';
   
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setModalVisible] = useState(false);
   const [sortAsc, setSortAsc] = useState(false);
 
-  // Điều khiển Dropdown Category & Drawer
   const [showCatDropdown, setShowCatDropdown] = useState(false);
   const [isDrawerOpen, setDrawerOpen] = useState(false);
 
-  // --- STATE TÌM KIẾM VÀ LỌC MA TRẬN (MODULE 6) ---
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'TODO' | 'COMPLETED'>('ALL');
   const [filterPriority, setFilterPriority] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH'>('ALL');
   const [filterCategoryId, setFilterCategoryId] = useState<string | 'ALL'>('ALL');
 
-  // Form State tạo Task mới
   const [newTask, setNewTask] = useState({
     title: '', 
     description: '', 
@@ -60,7 +65,6 @@ export default function Home() {
     recurrence: 'NONE' as 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY',
   });
 
-  // Tự động làm mới dữ liệu mỗi khi người dùng quay lại màn hình Home
   useFocusEffect(
     useCallback(() => {
       if (isAuthenticated && user?.id) {
@@ -70,26 +74,51 @@ export default function Home() {
   );
 
   const fetchData = async () => {
+    if (!user?.id) return;
     setLoading(true);
-    const { data: tasksData } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', user?.id)
-      .order('created_at', { ascending: false });
 
-    // Tải toàn bộ subtask
-    const { data: subData } = await supabase.from('subtasks').select('*');
-    if (subData) dispatch(setSubtasks(subData));
+    try {
+      const { data: tasksData } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
-    if (tasksData) dispatch(setTasks(tasksData));
+      if (tasksData) dispatch(setTasks(tasksData));
 
-    const { data: catsData } = await supabase
-      .from('categories')
-      .select('*')
-      .eq('user_id', user?.id);
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
-    if (catsData) dispatch(setCategories(catsData));
-    setLoading(false);
+      if (profileData) {
+        dispatch(setProfile({
+          username: profileData.username || '',
+          bio: profileData.bio || '',
+          avatar_url: profileData.avatar_url,
+          cover_url: profileData.cover_url,
+        }));
+        if (profileData.theme) dispatch(setTheme(profileData.theme));
+        if (profileData.language) dispatch(setLanguage(profileData.language));
+        if (profileData.timezone) dispatch(setTimezone(profileData.timezone));
+      }
+
+      const { data: subData } = await supabase.from('subtasks').select('*');
+      if (subData) dispatch(setSubtasks(subData));
+
+      const { data: catsData } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (catsData) dispatch(setCategories(catsData));
+
+    } catch (err) {
+      console.error('FetchData error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -118,6 +147,7 @@ export default function Home() {
       tags: newTask.tags, 
       recurrence: newTask.recurrence,
       streak: 0,
+      is_deleted: false,
       user_id: user.id, 
       status: 'TODO' 
     };
@@ -146,54 +176,52 @@ export default function Home() {
   };
 
   const handleToggle = async (id: string) => {
-    const task = tasks.find(t => t.id === id);
+    const task = tasks.find(tItem => tItem.id === id);
     if (!task) return;
 
-    // Nếu là Task lặp lại và đang từ TODO -> bấm hoàn thành: Tự động gia hạn chu kỳ kế tiếp
     if (task.status === 'TODO' && task.recurrence && task.recurrence !== 'NONE') {
       const baseDate = task.due_date ? new Date(task.due_date) : new Date();
       const nextDate = new Date(baseDate);
 
-      if (task.recurrence === 'DAILY') {
-        nextDate.setDate(nextDate.getDate() + 1);
-      } else if (task.recurrence === 'WEEKLY') {
-        nextDate.setDate(nextDate.getDate() + 7);
-      } else if (task.recurrence === 'MONTHLY') {
-        nextDate.setMonth(nextDate.getMonth() + 1);
-      }
+      if (task.recurrence === 'DAILY') nextDate.setDate(nextDate.getDate() + 1);
+      else if (task.recurrence === 'WEEKLY') nextDate.setDate(nextDate.getDate() + 7);
+      else if (task.recurrence === 'MONTHLY') nextDate.setMonth(nextDate.getMonth() + 1);
 
       const nextDueDateStr = nextDate.toISOString().split('T')[0];
       const newStreak = (task.streak || 0) + 1;
 
-      // Cập nhật Redux ngay lập tức
-      dispatch(setTasks(tasks.map(t => t.id === id ? {
-        ...t,
+      dispatch(setTasks(tasks.map(tItem => tItem.id === id ? {
+        ...tItem,
         due_date: nextDueDateStr,
         streak: newStreak,
         status: 'TODO'
-      } : t)));
+      } : tItem)));
 
-      triggerCyborgNotification('STREAK_EXTENDED', `Chuỗi liên tục đạt cấp độ: ${newStreak} 🔥`);
+      triggerCyborgNotification('STREAK_EXTENDED', `Chuỗi liên tục đạt: 🔥${newStreak}`);
 
-      // Cập nhật Supabase
       await supabase.from('tasks').update({
         due_date: nextDueDateStr,
         streak: newStreak,
         status: 'TODO'
       }).eq('id', id);
-
       return;
     }
 
-    // Logic bình thường đối với task không lặp lại
     const newStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED';
     dispatch(toggleTaskStatus(id));
     await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
   };
 
   const handleDelete = async (id: string) => {
-    dispatch(deleteTask(id));
-    await supabase.from('tasks').delete().eq('id', id);
+    const deletedTimestamp = new Date().toISOString();
+    dispatch(softDeleteTask({ id, deleted_at: deletedTimestamp }));
+
+    await supabase
+      .from('tasks')
+      .update({ is_deleted: true, deleted_at: deletedTimestamp })
+      .eq('id', id);
+
+    triggerCyborgNotification('NODE_QUARANTINED', 'Nhiệm vụ đã chuyển vào Vùng cách ly.');
   };
 
   const handleTestAlert = async () => {
@@ -212,11 +240,13 @@ export default function Home() {
     setFilterCategoryId('ALL');
   };
 
-  // --- THUẬT TOÁN TÌM KIẾM, LỌC ĐA TIÊU CHÍ VÀ SẮP XẾP ---
+  const quarantinedCount = useMemo(() => tasks.filter(tItem => tItem.is_deleted === true).length, [tasks]);
+
   const processedTasks = useMemo(() => {
     return tasks
       .filter((task) => {
-        // 1. Lọc từ khóa tìm kiếm (Title, Description, Tags)
+        if (task.is_deleted === true) return false;
+
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           const matchTitle = task.title?.toLowerCase().includes(q);
@@ -225,13 +255,9 @@ export default function Home() {
           if (!matchTitle && !matchDesc && !matchTags) return false;
         }
 
-        // 2. Lọc theo trạng thái
         if (filterStatus !== 'ALL' && task.status !== filterStatus) return false;
-
-        // 3. Lọc theo mức độ ưu tiên
         if (filterPriority !== 'ALL' && task.priority !== filterPriority) return false;
 
-        // 4. Lọc theo danh mục
         if (filterCategoryId !== 'ALL') {
           if (filterCategoryId === 'ROOT' && task.category_id !== null) return false;
           if (filterCategoryId !== 'ROOT' && task.category_id !== filterCategoryId) return false;
@@ -240,12 +266,10 @@ export default function Home() {
         return true;
       })
       .sort((a, b) => {
-        // Luôn ưu tiên TODO lên trước COMPLETED
         if (a.status === 'TODO' && b.status === 'COMPLETED') return -1;
         if (a.status === 'COMPLETED' && b.status === 'TODO') return 1;
 
         if (!sortAsc) return 0;
-
         if (!a.due_date) return 1;
         if (!b.due_date) return -1;
 
@@ -260,29 +284,54 @@ export default function Home() {
     ? '[ ROOT ]' 
     : categoriesList.find(c => c.id === newTask.categoryId)?.name || '[ UNKNOWN ]';
 
+  const webInputStyle = { 
+    backgroundColor: colors.inputBg, 
+    color: colors.white, 
+    padding: '12px', 
+    border: `1px solid ${colors.border}`, 
+    fontFamily: 'monospace', 
+    width: '100%', 
+    boxSizing: 'border-box', 
+    outline: 'none', 
+    colorScheme: theme === 'CYBER_DARK' ? 'dark' : 'light' 
+  } as any;
+
   return (
     <View style={styles.container}>
       {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerTitleWrapper}>
-          <GlitchText text="TASKS_DB" fontSize={26} />
+          <GlitchText text={t.tasksDb} fontSize={26} />
         </View>
-        <TouchableOpacity 
-          style={styles.menuToggleBtn} 
-          onPress={() => setDrawerOpen(true)}
-        >
-          <Text style={styles.menuToggleText}>[ ≡ SYS_MENU ]</Text>
-        </TouchableOpacity>
+
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity 
+            style={styles.headerAvatarBtn} 
+            onPress={() => router.push('/settings' as any)}
+          >
+            <Image 
+              source={{ uri: profile?.avatar_url || 'https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif' }} 
+              style={styles.headerAvatarImg} 
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.menuToggleBtn} 
+            onPress={() => setDrawerOpen(true)}
+          >
+            <Text style={styles.menuToggleText}>{t.sysMenu}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* THANH TÌM KIẾM DÒNG LỆNH (LIVE SEARCH) */}
+      {/* THANH TÌM KIẾM */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="SEARCH_QUERY //: gõ tên, mô tả hoặc tag..."
-          placeholderTextColor={Colors.textLight}
+          placeholder={t.searchPlaceholder}
+          placeholderTextColor={colors.textLight}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity style={styles.searchClearBtn} onPress={() => setSearchQuery('')}>
@@ -291,41 +340,42 @@ export default function Home() {
         )}
       </View>
 
-      {/* TOOLBAR ĐIỀU KHIỂN & BẬT TẮT MA TRẬN LỌC */}
+      {/* TOOLBAR */}
       <View style={styles.toolbar}>
         <View style={styles.toolbarLeft}>
           <Text style={styles.label}>
-            MATCHED: {processedTasks.length}/{tasks.length}
+            {t.matched} {processedTasks.length}/{tasks.filter(tItem => !tItem.is_deleted).length}
           </Text>
           <TouchableOpacity 
             style={[styles.filterToggleBtn, (showFilterPanel || isFilterActive) && styles.filterToggleBtnActive]} 
             onPress={() => setShowFilterPanel(!showFilterPanel)}
           >
-            <Text style={[styles.filterToggleText, (showFilterPanel || isFilterActive) && { color: Colors.background }]}>
-              [ FILTER_MATRIX {isFilterActive ? '*' : ''} ]
+            <Text style={[styles.filterToggleText, (showFilterPanel || isFilterActive) && { color: isDark ? colors.primary : '#000000' }]}>
+              {t.filterMatrix} {isFilterActive ? '*' : ''}
             </Text>
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity onPress={() => setSortAsc(!sortAsc)} style={styles.sortBtn}>
-          <Text style={styles.sortText}>DEADLINE: [ {sortAsc ? 'ASC' : 'DEFAULT'} ]</Text>
+          <Text style={styles.sortText}>
+            {t.deadlineSort} [ {sortAsc ? t.sortAsc : t.sortDefault} ]
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* BẢNG LỌC MA TRẬN (EXPANDABLE FILTER PANEL) */}
+      {/* BẢNG LỌC MA TRẬN */}
       {showFilterPanel && (
         <View style={styles.filterMatrixCard}>
           <View style={styles.filterMatrixHeader}>
             <Text style={styles.filterMatrixTitle}>QUERY_FILTER_MATRIX //</Text>
             {isFilterActive && (
               <TouchableOpacity onPress={handleResetFilters}>
-                <Text style={styles.resetFilterText}>[ RESET_ALL ]</Text>
+                <Text style={styles.resetFilterText}>{t.resetAll}</Text>
               </TouchableOpacity>
             )}
           </View>
 
-          {/* 1. Lọc Trạng thái */}
-          <Text style={styles.filterSubLabel}>STATUS //:</Text>
+          <Text style={styles.filterSubLabel}>{t.status}</Text>
           <View style={styles.filterRow}>
             {(['ALL', 'TODO', 'COMPLETED'] as const).map((st) => (
               <TouchableOpacity
@@ -333,15 +383,14 @@ export default function Home() {
                 style={[styles.filterChip, filterStatus === st && styles.filterChipActive]}
                 onPress={() => setFilterStatus(st)}
               >
-                <Text style={[styles.filterChipText, filterStatus === st && { color: Colors.background }]}>
-                  {st}
+                <Text style={[styles.filterChipText, filterStatus === st && { color: isDark ? colors.primary : '#000000' }]}>
+                  {st === 'ALL' ? t.all : st === 'TODO' ? t.todo : t.completed}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {/* 2. Lọc Priority */}
-          <Text style={styles.filterSubLabel}>PRIORITY //:</Text>
+          <Text style={styles.filterSubLabel}>{t.priority}</Text>
           <View style={styles.filterRow}>
             {(['ALL', 'LOW', 'MEDIUM', 'HIGH'] as const).map((pr) => (
               <TouchableOpacity
@@ -349,46 +398,27 @@ export default function Home() {
                 style={[styles.filterChip, filterPriority === pr && styles.filterChipActive]}
                 onPress={() => setFilterPriority(pr)}
               >
-                <Text style={[styles.filterChipText, filterPriority === pr && { color: Colors.background }]}>
-                  {pr}
+                <Text style={[styles.filterChipText, filterPriority === pr && { color: isDark ? colors.primary : '#000000' }]}>
+                  {pr === 'ALL' ? t.all : pr}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {/* CHỌN CHU KỲ LẶP LẠI */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>RECURRENCE_PROTOCOL //:</Text>
-                <View style={styles.row}>
-                  {(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map(rec => (
-                    <TouchableOpacity 
-                      key={rec} 
-                      style={[styles.priorityBtn, newTask.recurrence === rec && styles.priorityBtnActive]} 
-                      onPress={() => setNewTask({...newTask, recurrence: rec})}
-                    >
-                      <Text style={[styles.priorityText, newTask.recurrence === rec && { color: Colors.background }]}>
-                        {rec}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-          {/* 3. Lọc Danh mục */}
-          <Text style={styles.filterSubLabel}>CATEGORY //:</Text>
+          <Text style={styles.filterSubLabel}>{t.category}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScrollFilter}>
             <TouchableOpacity
               style={[styles.filterChip, filterCategoryId === 'ALL' && styles.filterChipActive, { marginRight: 6 }]}
               onPress={() => setFilterCategoryId('ALL')}
             >
-              <Text style={[styles.filterChipText, filterCategoryId === 'ALL' && { color: Colors.background }]}>ALL</Text>
+              <Text style={[styles.filterChipText, filterCategoryId === 'ALL' && { color: isDark ? colors.primary : '#000000' }]}>{t.all}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.filterChip, filterCategoryId === 'ROOT' && styles.filterChipActive, { marginRight: 6 }]}
               onPress={() => setFilterCategoryId('ROOT')}
             >
-              <Text style={[styles.filterChipText, filterCategoryId === 'ROOT' && { color: Colors.background }]}>[ ROOT ]</Text>
+              <Text style={[styles.filterChipText, filterCategoryId === 'ROOT' && { color: isDark ? colors.primary : '#000000' }]}>[ ROOT ]</Text>
             </TouchableOpacity>
 
             {categoriesList.map((cat) => (
@@ -397,13 +427,13 @@ export default function Home() {
                 style={[
                   styles.filterChip, 
                   filterCategoryId === cat.id && styles.filterChipActive,
-                  { borderColor: cat.color || Colors.primary, marginRight: 6 }
+                  { borderColor: cat.color || colors.primary, marginRight: 6 }
                 ]}
                 onPress={() => setFilterCategoryId(cat.id)}
               >
                 <Text style={[
                   styles.filterChipText, 
-                  filterCategoryId === cat.id ? { color: Colors.background } : { color: cat.color || Colors.primary }
+                  filterCategoryId === cat.id ? { color: isDark ? colors.primary : '#000000' } : { color: cat.color || colors.primary }
                 ]}>
                   {cat.name}
                 </Text>
@@ -413,9 +443,9 @@ export default function Home() {
         </View>
       )}
 
-      {/* DANH SÁCH CÔNG VIỆC SAU KHI LỌC */}
+      {/* DANH SÁCH TASK */}
       {loading && tasks.length === 0 ? (
-        <ActivityIndicator color={Colors.primary} size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       ) : (
         <FlatList 
           data={processedTasks} 
@@ -424,10 +454,10 @@ export default function Home() {
           contentContainerStyle={{ paddingBottom: 100 }} 
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>NO_NODES_MATCHED_QUERY //</Text>
+              <Text style={styles.emptyText}>{t.noTasksMatched}</Text>
               {isFilterActive && (
                 <TouchableOpacity onPress={handleResetFilters} style={styles.emptyResetBtn}>
-                  <Text style={styles.emptyResetText}>[ CLEAR_FILTERS ]</Text>
+                  <Text style={styles.emptyResetText}>{t.clearFilters}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -435,67 +465,129 @@ export default function Home() {
         />
       )}
 
-      {/* NÚT THÊM TASK NỔI */}
+      {/* NÚT THÊM TASK */}
       <View style={styles.fabContainer}>
-        <CustomButton title="ADD_NEW_NODE" onPress={() => setModalVisible(true)} />
+        <CustomButton title={t.addNode} onPress={() => setModalVisible(true)} />
       </View>
 
-      {/* DRAWER BÊN PHẢI */}
+      {/* DRAWER */}
       {isDrawerOpen && (
         <View style={styles.drawerOverlay}>
           <TouchableOpacity style={styles.drawerBackdrop} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawerContainer}>
             <View style={styles.drawerHeader}>
-              <Text style={styles.drawerTitle}>SYSTEM_CONTROL //</Text>
+              <Text style={styles.drawerTitle}>{t.systemControl}</Text>
               <TouchableOpacity onPress={() => setDrawerOpen(false)}>
                 <Text style={styles.closeText}>[ X ]</Text>
               </TouchableOpacity>
             </View>
 
+            {/* MINI PROFILE CARD */}
+            <View style={styles.drawerProfileCard}>
+              <Image 
+                source={{ uri: profile?.avatar_url || 'https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif' }} 
+                style={styles.drawerAvatarImg} 
+              />
+              <View style={styles.drawerProfileInfo}>
+                <View 
+                  style={[
+                    styles.drawerNameWrapper, 
+                    { 
+                      borderLeftColor: colors.primary,
+                      borderColor: colors.border,
+                      backgroundColor: isDark 
+                        ? 'rgba(10, 10, 10, 0.8)' 
+                        : 'rgba(255, 255, 255, 0.85)',
+                    }
+                  ]}
+                >
+                  <Text 
+                    style={[
+                      styles.drawerProfileName, 
+                      { 
+                        color: colors.white,
+                        textShadowColor: isDark 
+                          ? 'rgba(0, 0, 0, 0.95)' 
+                          : 'rgba(255, 255, 255, 0.9)',
+                        textShadowOffset: { width: 1, height: 1 },
+                        textShadowRadius: 4,
+                      }
+                    ]} 
+                    numberOfLines={1}
+                  >
+                    {profile?.username || user?.email?.split('@')[0] || 'Cyborg_User'}
+                  </Text>
+                </View>
+
+                <TouchableOpacity 
+                  style={styles.editProfileBtn}
+                  onPress={() => { setDrawerOpen(false); router.push('/settings' as any); }}
+                >
+                  <Text style={styles.editProfileBtnText}>[ {t.profileSettings.replace('> ', '').replace('_', '')} ]</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <ScrollView style={styles.drawerLinks}>
+              <TouchableOpacity 
+                style={styles.drawerItem} 
+                onPress={() => { setDrawerOpen(false); router.push('/settings' as any); }}
+              >
+                <Text style={[styles.drawerLinkText, { color: colors.primary }]}>
+                  {t.profileSettings}
+                </Text>
+              </TouchableOpacity>
+
               <TouchableOpacity 
                 style={styles.drawerItem} 
                 onPress={() => { setDrawerOpen(false); router.push('/calendar' as any); }}
               >
-                <Text style={styles.drawerLinkText}>&gt; TIMELINE_</Text>
+                <Text style={styles.drawerLinkText}>{t.timeline}</Text>
               </TouchableOpacity>
 
-              {/* NÚT VÀO CHẾ ĐỘ TẬP TRUNG (MỚI) */}
               <TouchableOpacity 
                 style={styles.drawerItem} 
                 onPress={() => { setDrawerOpen(false); router.push('/focus' as any); }}
               >
-                <Text style={[styles.drawerLinkText, { color: Colors.white }]}>&gt; FOCUS_MODE_</Text>
+                <Text style={[styles.drawerLinkText, { color: colors.white }]}>{t.focusMode}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
                 style={styles.drawerItem} 
                 onPress={() => { setDrawerOpen(false); router.push('/analytics' as any); }}
               >
-                <Text style={[styles.drawerLinkText, { color: Colors.glitchCyan }]}>&gt; TELEMETRY_STATS_</Text>
+                <Text style={[styles.drawerLinkText, { color: colors.glitchCyan }]}>{t.telemetry}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
                 style={styles.drawerItem} 
                 onPress={() => { setDrawerOpen(false); router.push('/categories' as any); }}
               >
-                <Text style={[styles.drawerLinkText, { color: Colors.glitchMagenta }]}>&gt; CATEGORIES_</Text>
+                <Text style={[styles.drawerLinkText, { color: colors.glitchMagenta }]}>{t.categories}</Text>
               </TouchableOpacity>
 
-              {/* BẢNG CẤU HÌNH HỆ THỐNG THÔNG BÁO */}
+              <TouchableOpacity 
+                style={styles.drawerItem} 
+                onPress={() => { setDrawerOpen(false); router.push('/quarantine' as any); }}
+              >
+                <Text style={[styles.drawerLinkText, { color: quarantinedCount > 0 ? colors.danger : colors.textLight }]}>
+                  {t.quarantineVault} {quarantinedCount > 0 ? `[${quarantinedCount}]` : '[0]'}_
+                </Text>
+              </TouchableOpacity>
+
               <View style={styles.configBox}>
-                <Text style={styles.configHeading}>ALERT_SYSTEM //:</Text>
+                <Text style={styles.configHeading}>{t.alertSystem}</Text>
 
                 <TouchableOpacity 
                   style={[styles.configToggleBtn, notificationsEnabled && styles.configToggleBtnActive]} 
                   onPress={() => dispatch(toggleNotifications())}
                 >
-                  <Text style={[styles.configToggleText, notificationsEnabled && { color: Colors.background }]}>
-                    STATUS: [ {notificationsEnabled ? 'ACTIVE' : 'MUTED'} ]
+                  <Text style={[styles.configToggleText, notificationsEnabled && { color: isDark ? colors.primary : '#000000' }]}>
+                    {t.alertStatus} [ {notificationsEnabled ? t.alertActive : t.alertMuted} ]
                   </Text>
                 </TouchableOpacity>
 
-                <Text style={[styles.label, { marginTop: 15, fontSize: 11 }]}>DEFAULT_OFFSET //:</Text>
+                <Text style={[styles.label, { marginTop: 15, fontSize: 11 }]}>{t.defaultOffset}</Text>
                 <View style={styles.row}>
                   {[15, 30, 60].map((mins) => (
                     <TouchableOpacity
@@ -503,7 +595,7 @@ export default function Home() {
                       style={[styles.offsetBtn, defaultOffsetMinutes === mins && styles.offsetBtnActive]}
                       onPress={() => dispatch(setDefaultOffset(mins))}
                     >
-                      <Text style={[styles.offsetText, defaultOffsetMinutes === mins && { color: Colors.background }]}>
+                      <Text style={[styles.offsetText, defaultOffsetMinutes === mins && { color: isDark ? colors.primary : '#000000' }]}>
                         {mins}M
                       </Text>
                     </TouchableOpacity>
@@ -511,7 +603,7 @@ export default function Home() {
                 </View>
 
                 <TouchableOpacity style={styles.testBtn} onPress={handleTestAlert}>
-                  <Text style={styles.testBtnText}>&gt; TEST_ALERT_SIGNAL</Text>
+                  <Text style={styles.testBtnText}>{t.testSignal}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -519,7 +611,7 @@ export default function Home() {
                 style={[styles.drawerItem, { borderBottomWidth: 0, marginTop: 25 }]} 
                 onPress={handleLogout}
               >
-                <Text style={[styles.drawerLinkText, { color: Colors.danger }]}>&gt; DISCONNECT_</Text>
+                <Text style={[styles.drawerLinkText, { color: colors.danger }]}>{t.disconnect}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -531,34 +623,33 @@ export default function Home() {
         <View style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={styles.scrollModal} keyboardShouldPersistTaps="handled">
             <View style={styles.modalContent}>
-              <Text style={styles.modalHeader}>INITIALIZE_NEW_TASK //</Text>
+              <Text style={styles.modalHeader}>{t.initNewTask}</Text>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>TITLE //:</Text>
+                <Text style={styles.label}>{t.title}</Text>
                 <TextInput 
                   style={styles.input} 
                   value={newTask.title} 
-                  onChangeText={(t) => setNewTask({...newTask, title: t})} 
-                  placeholder="Nhập tiêu đề..." 
-                  placeholderTextColor={Colors.textLight} 
+                  onChangeText={(tText) => setNewTask({...newTask, title: tText})} 
+                  placeholder={t.titlePlaceholder} 
+                  placeholderTextColor={colors.textLight} 
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>DESCRIPTION //:</Text>
+                <Text style={styles.label}>{t.description}</Text>
                 <TextInput 
                   style={[styles.input, { height: 90, textAlignVertical: 'top' }]} 
                   value={newTask.description} 
-                  onChangeText={(t) => setNewTask({...newTask, description: t})} 
-                  placeholder="Nhập mô tả..." 
-                  placeholderTextColor={Colors.textLight} 
+                  onChangeText={(tText) => setNewTask({...newTask, description: tText})} 
+                  placeholder={t.descPlaceholder} 
+                  placeholderTextColor={colors.textLight} 
                   multiline 
                 />
               </View>
 
-              {/* DROPDOWN CHỌN DANH MỤC (HỖ TRỢ CUỘN TOÀN BỘ DANH SÁCH) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>CATEGORY //:</Text>
+                <Text style={styles.label}>{t.category}</Text>
                 <TouchableOpacity 
                   style={styles.dropdownBtn} 
                   onPress={() => setShowCatDropdown(!showCatDropdown)}
@@ -593,7 +684,7 @@ export default function Home() {
                         }}
                       >
                         <View style={styles.dropdownItemRow}>
-                          <View style={[styles.catDot, { backgroundColor: cat.color || Colors.primary }]} />
+                          <View style={[styles.catDot, { backgroundColor: cat.color || colors.primary }]} />
                           <Text style={styles.dropdownItemText}>{cat.name}</Text>
                         </View>
                       </TouchableOpacity>
@@ -603,18 +694,18 @@ export default function Home() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>TAGS //:</Text>
+                <Text style={styles.label}>{t.tags}</Text>
                 <TextInput 
                   style={styles.input} 
                   value={newTask.tags} 
-                  onChangeText={(t) => setNewTask({...newTask, tags: t})} 
-                  placeholder="frontend, bug, v1.0..." 
-                  placeholderTextColor={Colors.textLight} 
+                  onChangeText={(tText) => setNewTask({...newTask, tags: tText})} 
+                  placeholder={t.tagsPlaceholder} 
+                  placeholderTextColor={colors.textLight} 
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>PRIORITY //:</Text>
+                <Text style={styles.label}>{t.priority}</Text>
                 <View style={styles.row}>
                   {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
                     <TouchableOpacity 
@@ -622,14 +713,31 @@ export default function Home() {
                       style={[styles.priorityBtn, newTask.priority === p && styles.priorityBtnActive]} 
                       onPress={() => setNewTask({...newTask, priority: p})}
                     >
-                      <Text style={[styles.priorityText, newTask.priority === p && { color: Colors.background }]}>{p}</Text>
+                      <Text style={[styles.priorityText, newTask.priority === p && { color: isDark ? colors.primary : '#000000' }]}>{p}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>DEADLINE (HẠN CHÓT) //:</Text>
+                <Text style={styles.label}>{t.recurrence}</Text>
+                <View style={styles.row}>
+                  {(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map(rec => (
+                    <TouchableOpacity 
+                      key={rec} 
+                      style={[styles.priorityBtn, newTask.recurrence === rec && styles.priorityBtnActive]} 
+                      onPress={() => setNewTask({...newTask, recurrence: rec})}
+                    >
+                      <Text style={[styles.priorityText, newTask.recurrence === rec && { color: isDark ? colors.primary : '#000000' }]}>
+                        {rec}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>{t.deadline}</Text>
                 {Platform.OS === 'web' ? (
                   <input 
                     type="date" 
@@ -641,15 +749,15 @@ export default function Home() {
                   <TextInput 
                     style={styles.input} 
                     value={newTask.dueDate} 
-                    onChangeText={(t) => setNewTask({...newTask, dueDate: t})} 
+                    onChangeText={(tText) => setNewTask({...newTask, dueDate: tText})} 
                     placeholder="YYYY-MM-DD" 
-                    placeholderTextColor={Colors.textLight} 
+                    placeholderTextColor={colors.textLight} 
                   />
                 )}
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>REMINDER_TIMESTAMP (GIỜ NHẮC) //:</Text>
+                <Text style={styles.label}>{t.reminder}</Text>
                 {Platform.OS === 'web' ? (
                   <input 
                     type="datetime-local" 
@@ -661,19 +769,19 @@ export default function Home() {
                   <TextInput 
                     style={styles.input} 
                     value={newTask.reminderTime} 
-                    onChangeText={(t) => setNewTask({...newTask, reminderTime: t})} 
+                    onChangeText={(tText) => setNewTask({...newTask, reminderTime: tText})} 
                     placeholder="YYYY-MM-DDTHH:mm" 
-                    placeholderTextColor={Colors.textLight} 
+                    placeholderTextColor={colors.textLight} 
                   />
                 )}
               </View>
 
               <View style={styles.modalActions}>
                 <View style={{ flex: 1, marginRight: 10 }}>
-                  <CustomButton title="CANCEL" variant="outline" onPress={() => setModalVisible(false)} />
+                  <CustomButton title={t.cancel} variant="outline" onPress={() => setModalVisible(false)} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <CustomButton title="EXECUTE" onPress={handleExecuteInsert} loading={loading} />
+                  <CustomButton title={t.execute} onPress={handleExecuteInsert} loading={loading} />
                 </View>
               </View>
             </View>
@@ -684,275 +792,391 @@ export default function Home() {
   );
 }
 
-const webInputStyle = { 
-  backgroundColor: Colors.background, 
-  color: Colors.white, 
-  padding: '12px', 
-  border: `1px solid ${Colors.border}`, 
-  fontFamily: 'monospace', 
-  width: '100%', 
-  boxSizing: 'border-box', 
-  outline: 'none', 
-  colorScheme: 'dark' 
-} as any;
+const getStyles = (colors: ColorPalette) => {
+  const isDark = colors.background === '#0D0D0D';
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: Colors.background },
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 15 
-  },
-  headerTitleWrapper: { flex: 1, alignItems: 'flex-start' },
-  menuToggleBtn: { 
-    paddingVertical: 8, 
-    paddingHorizontal: 12, 
-    borderWidth: 1, 
-    borderColor: Colors.primary, 
-    backgroundColor: Colors.surface, 
-    height: 40, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  menuToggleText: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
+  return StyleSheet.create({
+    container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: colors.background },
+    header: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      marginBottom: 15 
+    },
+    headerTitleWrapper: { flex: 1, alignItems: 'flex-start' },
+    headerRightActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    headerAvatarBtn: {
+      width: 38,
+      height: 38,
+      borderWidth: 2,
+      borderColor: colors.primary,
+      marginRight: 10,
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
+    },
+    headerAvatarImg: {
+      width: '100%',
+      height: '100%',
+    },
+    menuToggleBtn: { 
+      paddingVertical: 8, 
+      paddingHorizontal: 12, 
+      borderWidth: 2, 
+      borderColor: colors.primary, 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      height: 40, 
+      justifyContent: 'center', 
+      alignItems: 'center' 
+    },
+    menuToggleText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontWeight: 'bold' 
+    },
 
-  // Thanh tìm kiếm
-  searchContainer: {
-    position: 'relative',
-    marginBottom: 15,
-  },
-  searchInput: {
-    backgroundColor: Colors.surface,
-    color: Colors.white,
-    padding: 12,
-    paddingRight: 40,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    fontFamily: 'monospace',
-    fontSize: 13,
-  },
-  searchClearBtn: {
-    position: 'absolute',
-    right: 12,
-    top: 12,
-  },
-  searchClearText: {
-    color: Colors.danger,
-    fontFamily: 'monospace',
-    fontWeight: 'bold',
-  },
+    searchContainer: {
+      position: 'relative',
+      marginBottom: 15,
+    },
+    searchInput: {
+      backgroundColor: colors.surface,
+      color: colors.white,
+      padding: 12,
+      paddingRight: 40,
+      borderWidth: 1,
+      borderColor: colors.border,
+      fontFamily: 'monospace',
+      fontSize: 13,
+    },
+    searchClearBtn: {
+      position: 'absolute',
+      right: 12,
+      top: 12,
+    },
+    searchClearText: {
+      color: colors.danger,
+      fontFamily: 'monospace',
+      fontWeight: 'bold',
+    },
 
-  // Toolbar
-  toolbar: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 12, 
-    paddingBottom: 10, 
-    borderBottomWidth: 1, 
-    borderBottomColor: Colors.border 
-  },
-  toolbarLeft: { flexDirection: 'row', alignItems: 'center' },
-  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12 },
-  filterToggleBtn: {
-    marginLeft: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-  },
-  filterToggleBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterToggleText: {
-    color: Colors.primary,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  sortBtn: { 
-    backgroundColor: Colors.surface, 
-    paddingHorizontal: 8, 
-    paddingVertical: 4, 
-    borderWidth: 1, 
-    borderColor: Colors.border 
-  },
-  sortText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 11 },
+    toolbar: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      marginBottom: 12, 
+      paddingBottom: 10, 
+      borderBottomWidth: 1, 
+      borderBottomColor: colors.border 
+    },
+    toolbarLeft: { flexDirection: 'row', alignItems: 'center' },
+    label: { color: colors.primary, fontFamily: 'monospace', fontSize: 12 },
+    filterToggleBtn: {
+      marginLeft: 10,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface,
+    },
+    filterToggleBtnActive: {
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary,
+      borderColor: colors.primary,
+    },
+    filterToggleText: {
+      color: isDark ? colors.primary : colors.white,
+      fontFamily: 'monospace',
+      fontSize: 11,
+      fontWeight: 'bold',
+    },
+    sortBtn: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      paddingHorizontal: 8, 
+      paddingVertical: 4, 
+      borderWidth: 1.5, 
+      borderColor: colors.primary 
+    },
+    sortText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 11,
+      fontWeight: 'bold'
+    },
 
-  // Bảng Filter Ma trận
-  filterMatrixCard: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-    padding: 14,
-    marginBottom: 15,
-  },
-  filterMatrixHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222',
-    paddingBottom: 6,
-  },
-  filterMatrixTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
-  resetFilterText: { color: Colors.danger, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
-  filterSubLabel: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 5, marginTop: 6 },
-  filterRow: { flexDirection: 'row', marginBottom: 6 },
-  filterChip: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.background,
-    marginRight: 6,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterChipText: {
-    color: Colors.white,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  categoryScrollFilter: { flexDirection: 'row', marginTop: 4, marginBottom: 4 },
+    filterMatrixCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      padding: 14,
+      marginBottom: 15,
+    },
+    filterMatrixHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      paddingBottom: 6,
+    },
+    filterMatrixTitle: { color: colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+    resetFilterText: { color: colors.danger, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+    filterSubLabel: { color: colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 5, marginTop: 6 },
+    filterRow: { flexDirection: 'row', marginBottom: 6 },
+    filterChip: {
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface,
+      marginRight: 6,
+    },
+    filterChipActive: {
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary,
+      borderColor: colors.primary,
+    },
+    filterChipText: {
+      color: colors.white,
+      fontFamily: 'monospace',
+      fontSize: 10,
+      fontWeight: 'bold',
+    },
+    categoryScrollFilter: { flexDirection: 'row', marginTop: 4, marginBottom: 4 },
 
-  fabContainer: { position: 'absolute', bottom: 30, left: 20, right: 20 },
+    fabContainer: { position: 'absolute', bottom: 30, left: 20, right: 20 },
 
-  // Drawer
-  drawerOverlay: { 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    backgroundColor: 'rgba(0,0,0,0.75)', 
-    zIndex: 1000, 
-    flexDirection: 'row' 
-  },
-  drawerBackdrop: { flex: 1 },
-  drawerContainer: { 
-    width: '300px' as any, 
-    maxWidth: '85%', 
-    backgroundColor: Colors.surface, 
-    borderLeftWidth: 2, 
-    borderColor: Colors.primary, 
-    padding: 20, 
-    paddingTop: 50, 
-    height: '100%' 
-  },
-  drawerHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 20, 
-    borderBottomWidth: 1, 
-    borderBottomColor: Colors.border, 
-    paddingBottom: 15 
-  },
-  drawerTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
-  closeText: { color: Colors.danger, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
-  drawerLinks: { flex: 1 },
-  drawerItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222' },
-  drawerLinkText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 15, fontWeight: 'bold' },
+    drawerOverlay: { 
+      position: 'absolute', 
+      top: 0, 
+      left: 0, 
+      right: 0, 
+      bottom: 0, 
+      backgroundColor: 'rgba(0,0,0,0.65)', 
+      zIndex: 1000, 
+      flexDirection: 'row' 
+    },
+    drawerBackdrop: { flex: 1 },
+    drawerContainer: { 
+      width: '300px' as any, 
+      maxWidth: '85%', 
+      backgroundColor: colors.surface, 
+      borderLeftWidth: 2, 
+      borderColor: colors.primary, 
+      padding: 20, 
+      paddingTop: 50, 
+      height: '100%' 
+    },
+    drawerHeader: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      marginBottom: 15, 
+      borderBottomWidth: 1, 
+      borderBottomColor: colors.border, 
+      paddingBottom: 12 
+    },
+    drawerTitle: { color: colors.primary, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
+    closeText: { color: colors.danger, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' },
+    
+    drawerProfileCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      marginBottom: 15,
+    },
+    drawerAvatarImg: {
+      width: 46,
+      height: 46,
+      borderWidth: 2,
+      borderColor: colors.primary,
+      marginRight: 12,
+    },
+    drawerProfileInfo: {
+      flex: 1,
+    },
+    drawerNameWrapper: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderWidth: 1,
+      borderLeftWidth: 3,
+      alignSelf: 'flex-start',
+      marginBottom: 6,
+      ...(Platform.OS === 'web' ? { 
+        backdropFilter: 'blur(6px)', 
+        WebkitBackdropFilter: 'blur(6px)' 
+      } as any : {}),
+    },
+    drawerProfileName: {
+      fontFamily: 'monospace',
+      fontSize: 13,
+      fontWeight: 'bold',
+    },
+    editProfileBtn: {
+      alignSelf: 'flex-start',
+    },
+    editProfileBtnText: {
+      color: colors.glitchCyan,
+      fontFamily: 'monospace',
+      fontSize: 11,
+      fontWeight: 'bold',
+    },
 
-  // Cấu hình Alert trong Drawer
-  configBox: { 
-    marginTop: 25, 
-    padding: 12, 
-    borderWidth: 1, 
-    borderColor: Colors.border, 
-    backgroundColor: Colors.background 
-  },
-  configHeading: { color: Colors.primary, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
-  configToggleBtn: { padding: 10, borderWidth: 1, borderColor: Colors.primary, alignItems: 'center', backgroundColor: 'transparent' },
-  configToggleBtnActive: { backgroundColor: Colors.primary },
-  configToggleText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
-  offsetBtn: { flex: 1, padding: 8, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
-  offsetBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  offsetText: { color: Colors.white, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
-  testBtn: { marginTop: 15, padding: 8, borderWidth: 1, borderColor: Colors.glitchCyan, alignItems: 'center' },
-  testBtnText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+    drawerLinks: { flex: 1 },
+    drawerItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+    drawerLinkText: { color: colors.primary, fontFamily: 'monospace', fontSize: 15, fontWeight: 'bold' },
 
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center' },
-  scrollModal: { flexGrow: 1, justifyContent: 'center', padding: 20 },
-  modalContent: { 
-    backgroundColor: Colors.surface, 
-    padding: 20, 
-    borderWidth: 1, 
-    borderColor: Colors.primary, 
-    shadowColor: Colors.primary, 
-    shadowOpacity: 0.5, 
-    shadowRadius: 10 
-  },
-  modalHeader: { 
-    color: Colors.white, 
-    fontSize: 18, 
-    fontFamily: 'monospace', 
-    fontWeight: 'bold', 
-    marginBottom: 20, 
-    textAlign: 'center', 
-    borderBottomWidth: 1, 
-    borderBottomColor: Colors.textLight, 
-    paddingBottom: 10 
-  },
-  inputGroup: { marginBottom: 15 },
-  input: { 
-    backgroundColor: Colors.background, 
-    color: Colors.white, 
-    padding: 12, 
-    borderWidth: 1, 
-    borderColor: Colors.border, 
-    fontFamily: 'monospace' 
-  },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  priorityBtn: { flex: 1, padding: 12, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2 },
-  priorityBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  priorityText: { color: Colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
-  modalActions: { flexDirection: 'row', marginTop: 15 },
+    configBox: { 
+      marginTop: 20, 
+      padding: 12, 
+      borderWidth: 1, 
+      borderColor: colors.border, 
+      backgroundColor: colors.background 
+    },
+    configHeading: { color: colors.primary, fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
+    configToggleBtn: { 
+      padding: 10, 
+      borderWidth: 2, 
+      borderColor: colors.primary, 
+      alignItems: 'center', 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary 
+    },
+    configToggleBtnActive: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary 
+    },
+    configToggleText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 12, 
+      fontWeight: 'bold' 
+    },
+    offsetBtn: { 
+      flex: 1, 
+      padding: 8, 
+      borderWidth: 1.5, 
+      borderColor: colors.border, 
+      alignItems: 'center', 
+      marginHorizontal: 2,
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface,
+    },
+    offsetBtnActive: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      borderColor: colors.primary 
+    },
+    offsetText: { 
+      color: colors.white, 
+      fontFamily: 'monospace', 
+      fontSize: 11, 
+      fontWeight: 'bold' 
+    },
+    testBtn: { 
+      marginTop: 15, 
+      padding: 8, 
+      borderWidth: 1.5, 
+      borderColor: colors.glitchCyan, 
+      alignItems: 'center',
+      backgroundColor: isDark ? '#0D0D0D' : 'transparent',
+    },
+    testBtnText: { color: colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
 
-  // Dropdown
-  dropdownBtn: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    backgroundColor: Colors.background, 
-    padding: 12, 
-    borderWidth: 1, 
-    borderColor: Colors.border 
-  },
-  dropdownBtnText: { color: Colors.white, fontFamily: 'monospace' },
-  dropdownMenu: { 
-    backgroundColor: Colors.surface, 
-    borderWidth: 1, 
-    borderColor: Colors.border, 
-    borderTopWidth: 0, 
-    maxHeight: 180, // Tăng chiều cao và cho phép cuộn bên trong
-  },
-  dropdownItem: { 
-    padding: 12, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#222' 
-  },
-  dropdownItemRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
-  },
-  catDot: { 
-    width: 8, 
-    height: 8, 
-    marginRight: 10 
-  },
-  dropdownItemText: { color: Colors.primary, fontFamily: 'monospace' },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'center' },
+    scrollModal: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+    modalContent: { 
+      backgroundColor: colors.surface, 
+      padding: 20, 
+      borderWidth: 2, 
+      borderColor: colors.primary, 
+      shadowColor: colors.primary, 
+      shadowOpacity: 0.5, 
+      shadowRadius: 10 
+    },
+    modalHeader: { 
+      color: colors.white, 
+      fontSize: 18, 
+      fontFamily: 'monospace', 
+      fontWeight: 'bold', 
+      marginBottom: 20, 
+      textAlign: 'center', 
+      borderBottomWidth: 1, 
+      borderBottomColor: colors.border, 
+      paddingBottom: 10 
+    },
+    inputGroup: { marginBottom: 15 },
+    input: { 
+      backgroundColor: colors.inputBg, 
+      color: colors.white, 
+      padding: 12, 
+      borderWidth: 1, 
+      borderColor: colors.border, 
+      fontFamily: 'monospace' 
+    },
+    row: { flexDirection: 'row', justifyContent: 'space-between' },
+    priorityBtn: { 
+      flex: 1, 
+      padding: 12, 
+      borderWidth: 1.5, 
+      borderColor: colors.border, 
+      alignItems: 'center', 
+      marginHorizontal: 2, 
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface 
+    },
+    priorityBtnActive: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      borderColor: colors.primary 
+    },
+    priorityText: { color: colors.white, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold' },
+    modalActions: { flexDirection: 'row', marginTop: 15 },
 
-  emptyContainer: { alignItems: 'center', marginTop: 50 },
-  emptyText: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 13 },
-  emptyResetBtn: { marginTop: 15, padding: 8, borderWidth: 1, borderColor: Colors.primary },
-  emptyResetText: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12 }
-});
+    dropdownBtn: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      backgroundColor: colors.inputBg, 
+      padding: 12, 
+      borderWidth: 1, 
+      borderColor: colors.border 
+    },
+    dropdownBtnText: { color: colors.white, fontFamily: 'monospace' },
+    dropdownMenu: { 
+      backgroundColor: colors.surface, 
+      borderWidth: 1, 
+      borderColor: colors.border, 
+      borderTopWidth: 0, 
+      maxHeight: 180,
+    },
+    dropdownItem: { 
+      padding: 12, 
+      borderBottomWidth: 1, 
+      borderBottomColor: colors.border 
+    },
+    dropdownItemRow: { 
+      flexDirection: 'row', 
+      alignItems: 'center' 
+    },
+    catDot: { 
+      width: 8, 
+      height: 8, 
+      marginRight: 10 
+    },
+    dropdownItemText: { color: colors.primary, fontFamily: 'monospace' },
+
+    emptyContainer: { alignItems: 'center', marginTop: 50 },
+    emptyText: { color: colors.textLight, fontFamily: 'monospace', fontSize: 13 },
+    emptyResetBtn: { 
+      marginTop: 15, 
+      padding: 8, 
+      borderWidth: 2, 
+      borderColor: colors.primary,
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary
+    },
+    emptyResetText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 12,
+      fontWeight: 'bold'
+    }
+  });
+};

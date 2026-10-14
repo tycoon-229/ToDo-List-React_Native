@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import Colors from '../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColors';
+import { ColorPalette } from '../constants/Colors';
 
 interface CustomButtonProps {
   title: string;
@@ -10,21 +11,30 @@ interface CustomButtonProps {
 }
 
 export default function CustomButton({ title, onPress, variant = 'primary', loading = false }: CustomButtonProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => getStyles(colors), [colors]);
   const isOutline = variant === 'outline';
+  const isDark = colors.background === '#0D0D0D';
 
   return (
     <TouchableOpacity
       style={[
         styles.button,
-        isOutline ? styles.buttonOutline : styles.buttonPrimary,
+        isDark ? styles.buttonDark : styles.buttonLight,
+        isOutline && (isDark ? styles.buttonOutlineDark : styles.buttonOutlineLight),
       ]}
       onPress={onPress}
       disabled={loading}
     >
       {loading ? (
-        <ActivityIndicator color={isOutline ? Colors.primary : Colors.background} />
+        <ActivityIndicator color={isDark ? colors.primary : '#000000'} />
       ) : (
-        <Text style={[styles.text, isOutline ? styles.textOutline : styles.textPrimary]}>
+        <Text style={[
+          styles.text, 
+          isOutline 
+            ? (isDark ? styles.textOutlineDark : styles.textOutlineLight)
+            : (isDark ? styles.textDark : styles.textLight)
+        ]}>
           {isOutline ? `[ ${title} ]` : `> ${title} _`} 
         </Text>
       )}
@@ -32,36 +42,53 @@ export default function CustomButton({ title, onPress, variant = 'primary', load
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: ColorPalette) => StyleSheet.create({
   button: {
     padding: 15,
     alignItems: 'center',
     marginBottom: 15,
     borderWidth: 2,
-    borderColor: Colors.primary,
-    borderRadius: 0, // Phong cách góc cạnh, không bo tròn
+    borderColor: colors.primary,
+    borderRadius: 0,
   },
-  buttonPrimary: {
-    backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
+  buttonDark: {
+    backgroundColor: '#0D0D0D',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 5, // Phát sáng trên Android
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
   },
-  buttonOutline: {
+  buttonLight: {
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  buttonOutlineDark: {
     backgroundColor: 'transparent',
+    borderColor: colors.primary,
+  },
+  buttonOutlineLight: {
+    backgroundColor: 'transparent',
+    borderColor: colors.primary,
   },
   text: {
     fontWeight: '900',
     fontSize: 16,
     fontFamily: 'monospace',
-    textTransform: 'uppercase', // Chữ in hoa chuẩn Hacker
+    textTransform: 'uppercase',
   },
-  textPrimary: {
-    color: Colors.background, // Chữ đen trên nền xanh lá
+  textDark: {
+    color: colors.primary,
   },
-  textOutline: {
-    color: Colors.primary, // Chữ xanh lá
+  textLight: {
+    color: '#000000',
+  },
+  textOutlineDark: {
+    color: colors.primary,
+  },
+  textOutlineLight: {
+    color: '#000000',
   },
 });

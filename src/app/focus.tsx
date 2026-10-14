@@ -3,45 +3,46 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Platfo
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAppSelector } from '../store/hooks';
 import { playCyborgAlertSound, triggerCyborgNotification } from '../services/notificationService';
+import { useThemeColors } from '../hooks/useThemeColors';
+import { useTranslation } from '../hooks/useTranslation';
+import { ColorPalette } from '../constants/Colors';
 import GlitchText from '../components/GlitchText';
 import CustomButton from '../components/CustomButton';
-import Colors from '../constants/Colors';
 
 type Mode = 'FOCUS' | 'SHORT_BREAK' | 'LONG_BREAK';
 
 export default function FocusScreen() {
+  const colors = useThemeColors();
+  const t = useTranslation();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+  const isDark = colors.background === '#0D0D0D';
+
   const { taskId } = useLocalSearchParams<{ taskId?: string }>();
   const tasks = useAppSelector(state => state.tasks.tasksList);
   
-  // Task mục tiêu
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(taskId || null);
-  const activeTask = tasks.find(t => t.id === selectedTaskId);
+  const activeTask = tasks.find(item => item.id === selectedTaskId);
 
-  // 1. Quản lý thời lượng tùy chỉnh (Đơn vị: phút)
   const [durations, setDurations] = useState({
     FOCUS: 25,
     SHORT_BREAK: 5,
     LONG_BREAK: 15,
   });
 
-  // State tạm thời trong bảng cấu hình
   const [inputFocus, setInputFocus] = useState('25');
   const [inputShort, setInputShort] = useState('5');
   const [inputLong, setInputLong] = useState('15');
   const [showConfig, setShowConfig] = useState(false);
 
-  // 2. State đồng hồ đếm ngược
   const [mode, setMode] = useState<Mode>('FOCUS');
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isActive, setIsActive] = useState(false);
   const [completedCycles, setCompletedCycles] = useState(0);
 
-  // Tổng số giây của chế độ hiện tại để tính % tiến độ
   const totalDuration = useMemo(() => {
     return Math.max(durations[mode] * 60, 1);
   }, [durations, mode]);
 
-  // Bộ đếm thời gian
   useEffect(() => {
     let timer: any = null;
 
@@ -58,7 +59,7 @@ export default function FocusScreen() {
         setCompletedCycles(nextCycles);
         triggerCyborgNotification(
           'CYCLE_COMPLETED',
-          `Hoàn thành phiên tập trung cho node: ${activeTask ? activeTask.title : 'GENERAL_TASK'}`
+          `${t.focusingOn} ${activeTask ? activeTask.title : 'GENERAL_TASK'}`
         );
 
         if (nextCycles % 4 === 0) {
@@ -75,25 +76,21 @@ export default function FocusScreen() {
     return () => clearInterval(timer);
   }, [isActive, timeLeft, mode, completedCycles, activeTask, durations]);
 
-  // Chuyển đổi giữa các chế độ
   const switchMode = (newMode: Mode) => {
     setMode(newMode);
     setTimeLeft(durations[newMode] * 60);
     setIsActive(false);
   };
 
-  // Reset về thời lượng ban đầu của chế độ hiện tại
   const handleReset = () => {
     setIsActive(false);
     setTimeLeft(durations[mode] * 60);
   };
 
-  // Tăng/giảm thời gian nhanh bằng phút (+/-) khi đồng hồ đang dừng
   const handleAdjustMinutes = (deltaMinutes: number) => {
     if (isActive) return;
     const newSeconds = Math.max(60, timeLeft + deltaMinutes * 60);
     setTimeLeft(newSeconds);
-    // Cập nhật lại thời lượng gốc của mode hiện tại để thanh % tính chuẩn xác
     const newMins = Math.round(newSeconds / 60);
     setDurations(prev => ({ ...prev, [mode]: newMins }));
     if (mode === 'FOCUS') setInputFocus(newMins.toString());
@@ -101,7 +98,6 @@ export default function FocusScreen() {
     if (mode === 'LONG_BREAK') setInputLong(newMins.toString());
   };
 
-  // Áp dụng số phút nhập từ bảng cấu hình
   const handleApplyCustomConfig = () => {
     const f = Math.max(1, parseInt(inputFocus, 10) || 25);
     const s = Math.max(1, parseInt(inputShort, 10) || 5);
@@ -116,7 +112,6 @@ export default function FocusScreen() {
     if (Platform.OS === 'web') window.alert('TIMER_CONFIG_APPLIED: Đã ghi đè thời lượng chu kỳ mới.');
   };
 
-  // Định dạng mm:ss
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -125,51 +120,56 @@ export default function FocusScreen() {
 
   const progressPercent = Math.min(100, Math.max(0, Math.round(((totalDuration - timeLeft) / totalDuration) * 100)));
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/' as any);
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backLink}>{'< SYS_HOME'}</Text>
+        <TouchableOpacity onPress={handleBack}>
+          <Text style={styles.backLink}>{t.backHome}</Text>
         </TouchableOpacity>
-        <GlitchText text="CYBER_FOCUS" fontSize={24} />
+        <GlitchText text={t.focusTitle} fontSize={24} />
       </View>
 
-      {/* CHỌN MỤC TIÊU TẬP TRUNG */}
       <View style={styles.targetCard}>
-        <Text style={styles.targetLabel}>TARGET_NODE //:</Text>
+        <Text style={styles.targetLabel}>{t.targetNode}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.targetScroll}>
           <TouchableOpacity 
             style={[styles.targetChip, selectedTaskId === null && styles.targetChipActive]}
             onPress={() => setSelectedTaskId(null)}
           >
-            <Text style={[styles.targetChipText, selectedTaskId === null && { color: Colors.background }]}>
-              [ GENERAL_NEURAL_SESSION ]
+            <Text style={[styles.targetChipText, selectedTaskId === null && { color: isDark ? colors.primary : '#000000' }]}>
+              {t.generalSession}
             </Text>
           </TouchableOpacity>
 
-          {tasks.filter(t => t.status === 'TODO').map(t => (
+          {tasks.filter(item => item.status === 'TODO' && !item.is_deleted).map(item => (
             <TouchableOpacity 
-              key={t.id} 
-              style={[styles.targetChip, selectedTaskId === t.id && styles.targetChipActive]}
-              onPress={() => setSelectedTaskId(t.id)}
+              key={item.id} 
+              style={[styles.targetChip, selectedTaskId === item.id && styles.targetChipActive]}
+              onPress={() => setSelectedTaskId(item.id)}
             >
-              <Text style={[styles.targetChipText, selectedTaskId === t.id && { color: Colors.background }]}>
-                {t.title}
+              <Text style={[styles.targetChipText, selectedTaskId === item.id && { color: isDark ? colors.primary : '#000000' }]}>
+                {item.title}
               </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
-      {/* TABS CHUYỂN CHẾ ĐỘ KÈM SỐ PHÚT HIỆN TẠI */}
       <View style={styles.modeTabs}>
         <TouchableOpacity 
           style={[styles.modeBtn, mode === 'FOCUS' && styles.modeBtnActive]} 
           onPress={() => switchMode('FOCUS')}
         >
-          <Text style={[styles.modeText, mode === 'FOCUS' && { color: Colors.background }]}>
-            FOCUS ({durations.FOCUS}M)
+          <Text style={[styles.modeText, mode === 'FOCUS' && { color: isDark ? colors.primary : '#000000' }]}>
+            {t.focusTab} ({durations.FOCUS}M)
           </Text>
         </TouchableOpacity>
 
@@ -177,8 +177,8 @@ export default function FocusScreen() {
           style={[styles.modeBtn, mode === 'SHORT_BREAK' && styles.modeBtnActive]} 
           onPress={() => switchMode('SHORT_BREAK')}
         >
-          <Text style={[styles.modeText, mode === 'SHORT_BREAK' && { color: Colors.background }]}>
-            SHORT ({durations.SHORT_BREAK}M)
+          <Text style={[styles.modeText, mode === 'SHORT_BREAK' && { color: isDark ? colors.primary : '#000000' }]}>
+            {t.shortBreakTab} ({durations.SHORT_BREAK}M)
           </Text>
         </TouchableOpacity>
 
@@ -186,21 +186,19 @@ export default function FocusScreen() {
           style={[styles.modeBtn, mode === 'LONG_BREAK' && styles.modeBtnActive]} 
           onPress={() => switchMode('LONG_BREAK')}
         >
-          <Text style={[styles.modeText, mode === 'LONG_BREAK' && { color: Colors.background }]}>
-            LONG ({durations.LONG_BREAK}M)
+          <Text style={[styles.modeText, mode === 'LONG_BREAK' && { color: isDark ? colors.primary : '#000000' }]}>
+            {t.longBreakTab} ({durations.LONG_BREAK}M)
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* MÀN HÌNH ĐỒNG HỒ HUD */}
       <View style={styles.clockCard}>
         <Text style={styles.clockModeHeader}>
-          {mode === 'FOCUS' ? '>>> PROTOCOL: DEEP_FOCUS <<<' : '>>> PROTOCOL: RECHARGE_ENERGY <<<'}
+          {mode === 'FOCUS' ? t.protocolFocus : t.protocolBreak}
         </Text>
 
         <Text style={styles.timerDisplay}>{formatTime(timeLeft)}</Text>
 
-        {/* BỘ NÚT TĂNG/GIẢM NHANH THỜI GIAN KHI TẠM DỪNG */}
         {!isActive && (
           <View style={styles.adjustRow}>
             <TouchableOpacity style={styles.adjustBtn} onPress={() => handleAdjustMinutes(-5)}>
@@ -218,22 +216,20 @@ export default function FocusScreen() {
           </View>
         )}
 
-        {/* Thanh Gauge Bar tiến độ */}
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
         </View>
 
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>ELAPSED: {progressPercent}%</Text>
-          <Text style={styles.metaText}>CYCLES_COMPLETED: [{completedCycles}]</Text>
+          <Text style={styles.metaText}>{t.elapsed} {progressPercent}%</Text>
+          <Text style={styles.metaText}>{t.cyclesCompleted} [{completedCycles}]</Text>
         </View>
       </View>
 
-      {/* BẢNG ĐIỀU KHIỂN NÚT BẤM */}
       <View style={styles.actionRow}>
         <View style={{ flex: 2, marginRight: 10 }}>
           <CustomButton 
-            title={isActive ? 'PAUSE_PROTOCOL' : 'ENGAGE_FOCUS'} 
+            title={isActive ? t.pauseProtocol : t.engageFocus} 
             onPress={() => {
               playCyborgAlertSound();
               setIsActive(!isActive);
@@ -242,31 +238,29 @@ export default function FocusScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <CustomButton 
-            title="RESET" 
+            title={t.reset} 
             variant="outline" 
             onPress={handleReset} 
           />
         </View>
       </View>
 
-      {/* NÚT MỞ BẢNG CẤU HÌNH SỐ PHÚT CHUYÊN SÂU */}
       <TouchableOpacity 
         style={styles.configToggleBtn} 
         onPress={() => setShowConfig(!showConfig)}
       >
         <Text style={styles.configToggleText}>
-          {showConfig ? '[ HIDE_CUSTOM_CONFIG ▲ ]' : '[ CUSTOMIZE_DURATIONS_CONFIG ▼ ]'}
+          {showConfig ? t.hideConfig : t.showConfig}
         </Text>
       </TouchableOpacity>
 
-      {/* BẢNG NHẬP PHÚT TÙY Ý */}
       {showConfig && (
         <View style={styles.configCard}>
-          <Text style={styles.configHeading}>CUSTOM_DURATION_MATRIX (MINUTES) //:</Text>
+          <Text style={styles.configHeading}>{t.customDurationMatrix}</Text>
 
           <View style={styles.inputGroupRow}>
             <View style={styles.inputCol}>
-              <Text style={styles.inputLabel}>FOCUS //:</Text>
+              <Text style={styles.inputLabel}>{t.focusLabel}</Text>
               <TextInput
                 style={styles.numberInput}
                 value={inputFocus}
@@ -277,7 +271,7 @@ export default function FocusScreen() {
             </View>
 
             <View style={styles.inputCol}>
-              <Text style={styles.inputLabel}>SHORT_BREAK //:</Text>
+              <Text style={styles.inputLabel}>{t.shortBreakLabel}</Text>
               <TextInput
                 style={styles.numberInput}
                 value={inputShort}
@@ -288,7 +282,7 @@ export default function FocusScreen() {
             </View>
 
             <View style={styles.inputCol}>
-              <Text style={styles.inputLabel}>LONG_BREAK //:</Text>
+              <Text style={styles.inputLabel}>{t.longBreakLabel}</Text>
               <TextInput
                 style={styles.numberInput}
                 value={inputLong}
@@ -300,122 +294,159 @@ export default function FocusScreen() {
           </View>
 
           <TouchableOpacity style={styles.applyBtn} onPress={handleApplyCustomConfig}>
-            <Text style={styles.applyBtnText}>&gt; APPLY_DURATIONS_OVERWRITE &lt;</Text>
+            <Text style={styles.applyBtnText}>{t.applyDurations}</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* THÔNG TIN NHIỆM VỤ ĐANG TẬP TRUNG */}
       <View style={styles.statsCard}>
-        <Text style={styles.statsTitle}>FOCUS_SESSION_INTEL //</Text>
+        <Text style={styles.statsTitle}>{t.focusIntel}</Text>
         <Text style={styles.statsDesc}>
           {activeTask 
-            ? `Đang dồn năng lượng xử lý node: "${activeTask.title}"`
-            : 'Chưa gắn với node cụ thể. Phiên tập trung sẽ được ghi nhận vào hiệu suất chung.'}
+            ? `${t.focusingOn} "${activeTask.title}"`
+            : t.generalFocusDesc}
         </Text>
       </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 60 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  backLink: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
+const getStyles = (colors: ColorPalette) => {
+  const isDark = colors.background === '#0D0D0D';
 
-  targetCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, padding: 14, marginBottom: 15 },
-  targetLabel: { color: Colors.primary, fontFamily: 'monospace', fontSize: 11, marginBottom: 8, fontWeight: 'bold' },
-  targetScroll: { flexDirection: 'row' },
-  targetChip: { paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: Colors.border, marginRight: 8, backgroundColor: Colors.background },
-  targetChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  targetChipText: { color: Colors.white, fontFamily: 'monospace', fontSize: 11 },
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    scrollContent: { padding: 20, paddingTop: 50, paddingBottom: 60 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    backLink: { color: colors.primary, fontFamily: 'monospace', fontWeight: 'bold' },
 
-  modeTabs: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  modeBtn: { flex: 1, paddingVertical: 10, borderWidth: 1, borderColor: Colors.border, alignItems: 'center', marginHorizontal: 2, backgroundColor: Colors.surface },
-  modeBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  modeText: { color: Colors.white, fontFamily: 'monospace', fontSize: 10, fontWeight: 'bold' },
+    targetCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 15 },
+    targetLabel: { color: colors.primary, fontFamily: 'monospace', fontSize: 11, marginBottom: 8, fontWeight: 'bold' },
+    targetScroll: { flexDirection: 'row' },
+    targetChip: { 
+      paddingHorizontal: 12, 
+      paddingVertical: 6, 
+      borderWidth: 1.5, 
+      borderColor: colors.border, 
+      marginRight: 8, 
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface 
+    },
+    targetChipActive: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      borderColor: colors.primary 
+    },
+    targetChipText: { color: colors.white, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
 
-  clockCard: { 
-    backgroundColor: Colors.surface, 
-    borderWidth: 2, 
-    borderColor: Colors.primary, 
-    padding: 24, 
-    alignItems: 'center', 
-    marginBottom: 20,
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.5,
-    shadowRadius: 15,
-  },
-  clockModeHeader: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', marginBottom: 10 },
-  timerDisplay: { 
-    color: Colors.white, 
-    fontFamily: 'monospace', 
-    fontSize: 60, 
-    fontWeight: '900', 
-    letterSpacing: 4,
-    marginBottom: 10,
-    textShadowColor: Colors.primary,
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
-  },
+    modeTabs: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+    modeBtn: { 
+      flex: 1, 
+      paddingVertical: 10, 
+      borderWidth: 1.5, 
+      borderColor: colors.border, 
+      alignItems: 'center', 
+      marginHorizontal: 2, 
+      backgroundColor: isDark ? '#0D0D0D' : colors.surface 
+    },
+    modeBtnActive: { 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      borderColor: colors.primary 
+    },
+    modeText: { color: colors.white, fontFamily: 'monospace', fontSize: 10, fontWeight: 'bold' },
 
-  // Bộ nút tăng/giảm nhanh
-  adjustRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
-  adjustBtn: { 
-    borderWidth: 1, 
-    borderColor: Colors.border, 
-    paddingVertical: 4, 
-    paddingHorizontal: 10, 
-    marginHorizontal: 4, 
-    backgroundColor: Colors.background 
-  },
-  adjustBtnText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+    clockCard: { 
+      backgroundColor: colors.surface, 
+      borderWidth: 2, 
+      borderColor: colors.primary, 
+      padding: 24, 
+      alignItems: 'center', 
+      marginBottom: 20,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.5,
+      shadowRadius: 15,
+    },
+    clockModeHeader: { color: colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', marginBottom: 10 },
+    timerDisplay: { 
+      color: colors.white, 
+      fontFamily: 'monospace', 
+      fontSize: 60, 
+      fontWeight: '900', 
+      letterSpacing: 4,
+      marginBottom: 10,
+      textShadowColor: colors.primary,
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: 10,
+    },
 
-  progressTrack: { height: 10, width: '100%', backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border, marginBottom: 12 },
-  progressFill: { height: '100%', backgroundColor: Colors.primary },
-  metaRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
-  metaText: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 10 },
+    adjustRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 15 },
+    adjustBtn: { 
+      borderWidth: 1.5, 
+      borderColor: colors.primary, 
+      paddingVertical: 6, 
+      paddingHorizontal: 12, 
+      marginHorizontal: 4, 
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary 
+    },
+    adjustBtnText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontSize: 11, 
+      fontWeight: 'bold' 
+    },
 
-  actionRow: { flexDirection: 'row', marginBottom: 15 },
+    progressTrack: { height: 10, width: '100%', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
+    progressFill: { height: '100%', backgroundColor: colors.primary },
+    metaRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
+    metaText: { color: colors.textLight, fontFamily: 'monospace', fontSize: 10 },
 
-  // Toggle bảng cấu hình
-  configToggleBtn: { 
-    borderWidth: 1, 
-    borderColor: Colors.glitchCyan, 
-    padding: 10, 
-    alignItems: 'center', 
-    backgroundColor: Colors.surface, 
-    marginBottom: 15 
-  },
-  configToggleText: { color: Colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
+    actionRow: { flexDirection: 'row', marginBottom: 15 },
 
-  // Bảng nhập phút tùy chỉnh
-  configCard: { 
-    backgroundColor: Colors.surface, 
-    borderWidth: 1, 
-    borderColor: Colors.primary, 
-    padding: 16, 
-    marginBottom: 20 
-  },
-  configHeading: { color: Colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', marginBottom: 12 },
-  inputGroupRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  inputCol: { flex: 1, marginHorizontal: 4 },
-  inputLabel: { color: Colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
-  numberInput: { 
-    backgroundColor: Colors.background, 
-    color: Colors.white, 
-    borderWidth: 1, 
-    borderColor: Colors.border, 
-    padding: 10, 
-    fontFamily: 'monospace', 
-    fontSize: 14, 
-    textAlign: 'center' 
-  },
-  applyBtn: { backgroundColor: Colors.primary, padding: 12, alignItems: 'center' },
-  applyBtnText: { color: Colors.background, fontFamily: 'monospace', fontWeight: 'bold', fontSize: 12 },
+    configToggleBtn: { 
+      borderWidth: 1.5, 
+      borderColor: colors.glitchCyan, 
+      padding: 10, 
+      alignItems: 'center', 
+      backgroundColor: isDark ? '#0D0D0D' : 'transparent', 
+      marginBottom: 15 
+    },
+    configToggleText: { color: colors.glitchCyan, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold' },
 
-  statsCard: { backgroundColor: Colors.surface, borderWidth: 1, borderColor: '#262626', padding: 14 },
-  statsTitle: { color: Colors.primary, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', marginBottom: 5 },
-  statsDesc: { color: Colors.white, fontFamily: 'monospace', fontSize: 12, lineHeight: 18 }
-});
+    configCard: { 
+      backgroundColor: colors.surface, 
+      borderWidth: 1, 
+      borderColor: colors.primary, 
+      padding: 16, 
+      marginBottom: 20 
+    },
+    configHeading: { color: colors.primary, fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', marginBottom: 12 },
+    inputGroupRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
+    inputCol: { flex: 1, marginHorizontal: 4 },
+    inputLabel: { color: colors.textLight, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
+    numberInput: { 
+      backgroundColor: colors.inputBg, 
+      color: colors.white, 
+      borderWidth: 1, 
+      borderColor: colors.border, 
+      padding: 10, 
+      fontFamily: 'monospace', 
+      fontSize: 14, 
+      textAlign: 'center' 
+    },
+    applyBtn: { 
+      borderWidth: 2,
+      borderColor: colors.primary,
+      backgroundColor: isDark ? '#0D0D0D' : colors.primary, 
+      padding: 12, 
+      alignItems: 'center' 
+    },
+    applyBtnText: { 
+      color: isDark ? colors.primary : '#000000', 
+      fontFamily: 'monospace', 
+      fontWeight: 'bold', 
+      fontSize: 12 
+    },
+
+    statsCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 14 },
+    statsTitle: { color: colors.primary, fontFamily: 'monospace', fontSize: 11, fontWeight: 'bold', marginBottom: 5 },
+    statsDesc: { color: colors.white, fontFamily: 'monospace', fontSize: 12, lineHeight: 18 }
+  });
+};

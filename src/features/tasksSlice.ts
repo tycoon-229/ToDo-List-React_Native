@@ -8,11 +8,13 @@ export interface Task {
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
   due_date?: string;
   reminder_time?: string;
-  user_id?: string;
   category_id?: string | null;
   tags?: string;
   recurrence?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
   streak?: number;
+  is_deleted?: boolean;      // Đánh dấu nằm trong thùng rác
+  deleted_at?: string | null; // Thời điểm xóa mềm
+  user_id?: string;
 }
 
 interface TasksState {
@@ -47,11 +49,42 @@ const tasksSlice = createSlice({
         task.status = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED';
       }
     },
-    deleteTask: (state, action: PayloadAction<string>) => {
+    // Xóa mềm: đưa vào thùng rác
+    softDeleteTask: (state, action: PayloadAction<{ id: string; deleted_at: string }>) => {
+      const task = state.tasksList.find(t => t.id === action.payload.id);
+      if (task) {
+        task.is_deleted = true;
+        task.deleted_at = action.payload.deleted_at;
+      }
+    },
+    // Khôi phục từ thùng rác
+    restoreTask: (state, action: PayloadAction<string>) => {
+      const task = state.tasksList.find(t => t.id === action.payload);
+      if (task) {
+        task.is_deleted = false;
+        task.deleted_at = null;
+      }
+    },
+    // Xóa vĩnh viễn 1 task
+    purgeTask: (state, action: PayloadAction<string>) => {
       state.tasksList = state.tasksList.filter(t => t.id !== action.payload);
+    },
+    // Dọn sạch thùng rác
+    purgeAllDeleted: (state) => {
+      state.tasksList = state.tasksList.filter(t => !t.is_deleted);
     },
   },
 });
 
-export const { setTasks, addTask, updateTask, toggleTaskStatus, deleteTask } = tasksSlice.actions;
+export const { 
+  setTasks, 
+  addTask, 
+  updateTask, 
+  toggleTaskStatus, 
+  softDeleteTask, 
+  restoreTask, 
+  purgeTask, 
+  purgeAllDeleted 
+} = tasksSlice.actions;
+
 export default tasksSlice.reducer;

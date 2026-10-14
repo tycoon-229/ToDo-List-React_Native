@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { useAppSelector } from '../store/hooks';
-import Colors from '../constants/Colors';
+import { useThemeColors } from '../hooks/useThemeColors';
+import { ColorPalette } from '../constants/Colors';
 import { Task } from '../features/tasksSlice';
+import { formatDateTimeByZone } from '../constants/translations';
 
 interface TaskItemProps {
   task: Task;
@@ -12,8 +14,11 @@ interface TaskItemProps {
 }
 
 export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+
   const isCompleted = task.status === 'COMPLETED';
-  const priorityColor = task.priority === 'HIGH' ? Colors.danger : (task.priority === 'MEDIUM' ? '#FFFF00' : Colors.glitchCyan);
+  const priorityColor = task.priority === 'HIGH' ? colors.danger : (task.priority === 'MEDIUM' ? '#FFAE00' : colors.glitchCyan);
 
   const categoriesList = useAppSelector(state => state.categories.list);
   const category = task.category_id ? categoriesList.find(c => c.id === task.category_id) : null;
@@ -23,31 +28,28 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
 
   return (
     <View style={styles.container}>
-      {/* Checkbox hoàn thành */}
       <TouchableOpacity style={styles.checkboxWrapper} onPress={() => onToggle(task.id)}>
         <View style={[styles.checkbox, isCompleted && styles.checkboxCompleted]}>
           {isCompleted && <View style={styles.innerSquare} />}
         </View>
       </TouchableOpacity>
 
-      {/* Thân Task: BẤM VÀO ĐỂ XEM CHI TIẾT */}
       <TouchableOpacity 
         style={styles.contentWrapper} 
         onPress={() => router.push(`/task/${task.id}` as any)}
       >
         <View style={styles.badgeRow}>
           {category && (
-            <View style={[styles.categoryBadge, { borderColor: category.color || Colors.primary }]}>
-              <Text style={[styles.categoryBadgeText, { color: category.color || Colors.primary }]}>
+            <View style={[styles.categoryBadge, { borderColor: category.color || colors.primary }]}>
+              <Text style={[styles.categoryBadgeText, { color: category.color || colors.primary }]}>
                 {category.name}
               </Text>
             </View>
           )}
 
-          {/* HUY HIỆU CHU KỲ & CHUỖI STREAK */}
           {task.recurrence && task.recurrence !== 'NONE' && (
-            <View style={[styles.categoryBadge, { borderColor: '#ffae00' }]}>
-              <Text style={[styles.categoryBadgeText, { color: '#ffae00' }]}>
+            <View style={[styles.categoryBadge, { borderColor: '#FFAE00' }]}>
+              <Text style={[styles.categoryBadgeText, { color: '#FFAE00' }]}>
                 ⟳ {task.recurrence} {task.streak && task.streak > 0 ? `🔥${task.streak}` : ''}
               </Text>
             </View>
@@ -74,11 +76,14 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
 
         <View style={styles.metaRow}>
           <Text style={[styles.metaText, { color: priorityColor }]}>[{task.priority}]</Text>
-          {task.due_date && <Text style={styles.metaText}> | DUE: {task.due_date}</Text>}
+          {task.due_date && (
+            <Text style={styles.metaText}>
+              {' '} | DUE: {formatDateTimeByZone(task.due_date, useAppSelector(state => state.settings.timezone), useAppSelector(state => state.settings.language))}
+            </Text>
+          )}
         </View>
       </TouchableOpacity>
       
-      {/* CỘT NÚT THAO TÁC: NÚT EDIT NẰM TRÊN NÚT DEL */}
       <View style={styles.actionsColumn}>
         <TouchableOpacity 
           style={styles.actionBtn} 
@@ -98,12 +103,12 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: ColorPalette) => StyleSheet.create({
   container: { 
-    backgroundColor: Colors.surface, 
+    backgroundColor: colors.surface, 
     padding: 14, 
     borderWidth: 1, 
-    borderColor: Colors.border, 
+    borderColor: colors.border, 
     flexDirection: 'row', 
     alignItems: 'center', 
     marginBottom: 12 
@@ -113,49 +118,37 @@ const styles = StyleSheet.create({
     width: 22, 
     height: 22, 
     borderWidth: 2, 
-    borderColor: Colors.primary, 
+    borderColor: colors.primary, 
     justifyContent: 'center', 
-    alignItems: 'center' 
+    alignItems: 'center',
+    backgroundColor: 'transparent'
   },
-  checkboxCompleted: { borderColor: Colors.textLight },
-  innerSquare: { width: 10, height: 10, backgroundColor: Colors.textLight },
+  checkboxCompleted: { borderColor: colors.textLight },
+  innerSquare: { width: 10, height: 10, backgroundColor: colors.primary },
   contentWrapper: { flex: 1, justifyContent: 'center', alignItems: 'flex-start' },
   
   badgeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   categoryBadge: { borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, marginRight: 6 },
   categoryBadgeText: { fontSize: 9, fontFamily: 'monospace', fontWeight: 'bold', textTransform: 'uppercase' },
 
-  subtaskBadge: { borderWidth: 1, borderColor: Colors.glitchCyan, paddingHorizontal: 5, paddingVertical: 2 },
-  subtaskBadgeText: { fontSize: 9, fontFamily: 'monospace', fontWeight: 'bold', color: Colors.glitchCyan },
+  subtaskBadge: { borderWidth: 1, borderColor: colors.glitchCyan, paddingHorizontal: 5, paddingVertical: 2 },
+  subtaskBadgeText: { fontSize: 9, fontFamily: 'monospace', fontWeight: 'bold', color: colors.glitchCyan },
 
-  taskTitle: { fontSize: 15, color: Colors.white, fontFamily: 'monospace', marginBottom: 4 },
-  taskCompletedText: { textDecorationLine: 'line-through', color: Colors.textLight },
-  tagsText: { color: Colors.glitchMagenta, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
+  taskTitle: { fontSize: 15, color: colors.white, fontFamily: 'monospace', marginBottom: 4 },
+  taskCompletedText: { textDecorationLine: 'line-through', color: colors.textLight },
+  tagsText: { color: colors.glitchMagenta, fontFamily: 'monospace', fontSize: 10, marginBottom: 4 },
   metaRow: { flexDirection: 'row', alignItems: 'center' },
-  metaText: { fontSize: 11, fontFamily: 'monospace', color: Colors.textLight },
+  metaText: { fontSize: 11, fontFamily: 'monospace', color: colors.textLight },
 
-  // Cột nút bên phải
   actionsColumn: {
     marginLeft: 10,
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: 1,
-    borderLeftColor: '#222',
+    borderLeftColor: colors.border,
     paddingLeft: 10,
   },
-  actionBtn: {
-    paddingVertical: 4,
-  },
-  editText: {
-    color: Colors.glitchCyan,
-    fontFamily: 'monospace',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  deleteText: {
-    color: Colors.danger,
-    fontFamily: 'monospace',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
+  actionBtn: { paddingVertical: 4 },
+  editText: { color: colors.glitchCyan, fontFamily: 'monospace', fontWeight: 'bold', fontSize: 12 },
+  deleteText: { color: colors.danger, fontFamily: 'monospace', fontWeight: 'bold', fontSize: 12 },
 });

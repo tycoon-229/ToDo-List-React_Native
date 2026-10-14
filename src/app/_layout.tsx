@@ -51,12 +51,14 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="login" />
           <Stack.Screen name="register" />
+          <Stack.Screen name="settings" />
           <Stack.Screen name="calendar" />
           <Stack.Screen name="categories" />
           <Stack.Screen name="analytics" />
+          <Stack.Screen name="focus" />
+          <Stack.Screen name="quarantine" />
           <Stack.Screen name="task/[id]" />
           <Stack.Screen name="edit/[id]" />
-          <Stack.Screen name="focus" />
         </Stack>
       </AuthInitializer>
     </Provider>

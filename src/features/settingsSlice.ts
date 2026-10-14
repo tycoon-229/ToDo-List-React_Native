@@ -1,15 +1,24 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
+export type AppTheme = 'CYBER_DARK' | 'CYBER_LIGHT';
+export type AppLanguage = 'VI' | 'EN';
+
 interface SettingsState {
   notificationsEnabled: boolean;
-  defaultOffsetMinutes: number; // Số phút báo trước deadline: 15, 30, 60
-  notifiedTaskIds: string[];    // Lưu ID các task đã bắn thông báo
+  defaultOffsetMinutes: number;
+  notifiedTaskIds: string[];
+  theme: AppTheme;
+  language: AppLanguage;
+  timezone: string;
 }
 
 const initialState: SettingsState = {
   notificationsEnabled: true,
   defaultOffsetMinutes: 15,
   notifiedTaskIds: [],
+  theme: 'CYBER_DARK',
+  language: 'VI',
+  timezone: 'Asia/Ho_Chi_Minh',
 };
 
 const settingsSlice = createSlice({
@@ -27,11 +36,25 @@ const settingsSlice = createSlice({
         state.notifiedTaskIds.push(action.payload);
       }
     },
-    clearNotifiedHistory: (state) => {
-      state.notifiedTaskIds = [];
+    setTheme: (state, action: PayloadAction<AppTheme>) => {
+      state.theme = action.payload;
+    },
+    setLanguage: (state, action: PayloadAction<AppLanguage>) => {
+      state.language = action.payload;
+    },
+    setTimezone: (state, action: PayloadAction<string>) => {
+      state.timezone = action.payload;
     },
   },
 });
 
-export const { toggleNotifications, setDefaultOffset, markTaskNotified, clearNotifiedHistory } = settingsSlice.actions;
+export const { 
+  toggleNotifications, 
+  setDefaultOffset, 
+  markTaskNotified, 
+  setTheme, 
+  setLanguage, 
+  setTimezone 
+} = settingsSlice.actions;
+
 export default settingsSlice.reducer;

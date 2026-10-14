@@ -1,12 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '../services/supabase';
+import { useThemeColors } from '../hooks/useThemeColors';
+import { useTranslation } from '../hooks/useTranslation';
+import { ColorPalette } from '../constants/Colors';
 import CustomButton from '../components/CustomButton';
 import GlitchText from '../components/GlitchText';
-import Colors from '../constants/Colors';
 
 export default function RegisterScreen() {
+  const colors = useThemeColors();
+  const t = useTranslation();
+  const styles = useMemo(() => getStyles(colors), [colors]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,36 +37,51 @@ export default function RegisterScreen() {
 
   return (
     <View style={styles.container}>
-      <GlitchText text="REGISTER" />
+      <GlitchText text={t.register} />
       
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>NEW_EMAIL //:</Text>
-        <TextInput style={styles.input} placeholder="user@matrix.com" placeholderTextColor={Colors.textLight} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+        <Text style={styles.label}>NEW_{t.email}</Text>
+        <TextInput 
+          style={styles.input} 
+          placeholder="user@matrix.com" 
+          placeholderTextColor={colors.textLight} 
+          value={email} 
+          onChangeText={setEmail} 
+          autoCapitalize="none" 
+          keyboardType="email-address" 
+        />
       </View>
       
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>NEW_PASSWORD //:</Text>
-        <TextInput style={styles.input} placeholder="********" placeholderTextColor={Colors.textLight} value={password} onChangeText={setPassword} secureTextEntry />
+        <Text style={styles.label}>NEW_{t.password}</Text>
+        <TextInput 
+          style={styles.input} 
+          placeholder="********" 
+          placeholderTextColor={colors.textLight} 
+          value={password} 
+          onChangeText={setPassword} 
+          secureTextEntry 
+        />
       </View>
 
       <CustomButton title="CREATE_ENTITY" onPress={handleSignUp} loading={loading} />
       
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Đã có tài khoản?</Text>
+        <Text style={styles.footerText}>{t.hasAccount}</Text>
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.link}>[ QUAY LẠI LOGIN ]</Text>
+          <Text style={styles.link}>{t.backToLogin}</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: Colors.background },
+const getStyles = (colors: ColorPalette) => StyleSheet.create({
+  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: colors.background },
   inputGroup: { marginBottom: 20 },
-  label: { color: Colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 5 },
-  input: { backgroundColor: Colors.surface, color: Colors.white, padding: 15, borderWidth: 1, borderColor: Colors.border, fontFamily: 'monospace' },
+  label: { color: colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 5 },
+  input: { backgroundColor: colors.inputBg, color: colors.white, padding: 15, borderWidth: 1, borderColor: colors.border, fontFamily: 'monospace' },
   footer: { marginTop: 20, alignItems: 'center' },
-  footerText: { color: Colors.textLight, fontFamily: 'monospace', marginBottom: 10 },
-  link: { color: Colors.primary, fontFamily: 'monospace', fontWeight: 'bold' }
+  footerText: { color: colors.textLight, fontFamily: 'monospace', marginBottom: 10 },
+  link: { color: colors.primary, fontFamily: 'monospace', fontWeight: 'bold' }
 });
