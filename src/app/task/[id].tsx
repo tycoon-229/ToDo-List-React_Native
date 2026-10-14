@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useAppSelector, useAppDispatch } from '../../store/hooks';
-import { toggleTaskStatus } from '../../features/tasksSlice';
+import { toggleTaskStatus, updateTask } from '../../features/tasksSlice';
 import { setSubtasks, addSubtask, toggleSubtaskStatus, deleteSubtask } from '../../features/subtasksSlice';
 import { supabase } from '../../services/supabase';
 import GlitchText from '../../components/GlitchText';
@@ -54,6 +54,32 @@ export default function TaskDetailView() {
 
   // Đổi trạng thái task chính
   const handleToggleMainTask = async () => {
+    if (task.status === 'TODO' && task.recurrence && task.recurrence !== 'NONE') {
+      const baseDate = task.due_date ? new Date(task.due_date) : new Date();
+      const nextDate = new Date(baseDate);
+
+      if (task.recurrence === 'DAILY') nextDate.setDate(nextDate.getDate() + 1);
+      else if (task.recurrence === 'WEEKLY') nextDate.setDate(nextDate.getDate() + 7);
+      else if (task.recurrence === 'MONTHLY') nextDate.setMonth(nextDate.getMonth() + 1);
+
+      const nextDueDateStr = nextDate.toISOString().split('T')[0];
+      const newStreak = (task.streak || 0) + 1;
+
+      dispatch(updateTask({
+        ...task,
+        due_date: nextDueDateStr,
+        streak: newStreak,
+        status: 'TODO'
+      }));
+
+      await supabase.from('tasks').update({
+        due_date: nextDueDateStr,
+        streak: newStreak,
+        status: 'TODO'
+      }).eq('id', task.id);
+      return;
+    }
+
     const newStatus = isCompleted ? 'TODO' : 'COMPLETED';
     dispatch(toggleTaskStatus(task.id));
     await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id);
@@ -174,6 +200,22 @@ export default function TaskDetailView() {
         <View style={styles.hudCard}>
           <Text style={styles.hudLabel}>REMINDER</Text>
           <Text style={styles.hudValue}>{task.reminder_time ? task.reminder_time.replace('T', ' ') : 'MUTED'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.gridRow}>
+        <View style={styles.hudCard}>
+          <Text style={styles.hudLabel}>RECURRENCE</Text>
+          <Text style={[styles.hudValue, { color: '#ffae00' }]}>
+            {task.recurrence && task.recurrence !== 'NONE' ? `[ ${task.recurrence} ]` : 'NONE'}
+          </Text>
+        </View>
+
+        <View style={styles.hudCard}>
+          <Text style={styles.hudLabel}>STREAK_RECORD</Text>
+          <Text style={[styles.hudValue, { color: '#ffae00' }]}>
+            🔥 {task.streak || 0} CYCLES
+          </Text>
         </View>
       </View>
 

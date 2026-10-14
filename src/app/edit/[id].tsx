@@ -26,17 +26,20 @@ export default function EditTaskScreen() {
   const [loading, setLoading] = useState(false);
   const [showCatDropdown, setShowCatDropdown] = useState(false);
 
+  const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('NONE');
+
   useEffect(() => {
-    if (task) {
-      setTitle(task.title || '');
-      setDescription(task.description || '');
-      setPriority(task.priority || 'MEDIUM');
-      setDueDate(task.due_date || '');
-      setReminderTime(task.reminder_time || '');
-      setCategoryId(task.category_id || null);
-      setTags(task.tags || '');
-    }
-  }, [task]);
+  if (task) {
+    setTitle(task.title || '');
+    setDescription(task.description || '');
+    setPriority(task.priority || 'MEDIUM');
+    setDueDate(task.due_date || '');
+    setReminderTime(task.reminder_time || '');
+    setCategoryId(task.category_id || null);
+    setTags(task.tags || '');
+    setRecurrence(task.recurrence || 'NONE');
+  }
+}, [task]);
 
   if (!task) {
     return (
@@ -64,7 +67,8 @@ export default function EditTaskScreen() {
       due_date: dueDate || null, 
       reminder_time: reminderTime || null,
       category_id: categoryId, 
-      tags 
+      tags,
+      recurrence,
     };
     const reduxData = { 
       title, 
@@ -73,7 +77,8 @@ export default function EditTaskScreen() {
       due_date: dueDate || undefined, 
       reminder_time: reminderTime || undefined,
       category_id: categoryId, 
-      tags 
+      tags,
+      recurrence,
     };
 
     const { error } = await supabase.from('tasks').update(supabaseData).eq('id', id);
@@ -156,6 +161,23 @@ export default function EditTaskScreen() {
           {(['LOW', 'MEDIUM', 'HIGH'] as const).map(p => (
             <TouchableOpacity key={p} style={[styles.priorityBtn, priority === p && styles.priorityBtnActive]} onPress={() => setPriority(p)}>
               <Text style={[styles.priorityText, priority === p && { color: Colors.background }]}>{p}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>RECURRENCE_PROTOCOL //:</Text>
+        <View style={styles.row}>
+          {(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map(rec => (
+            <TouchableOpacity 
+              key={rec} 
+              style={[styles.priorityBtn, recurrence === rec && styles.priorityBtnActive]} 
+              onPress={() => setRecurrence(rec)}
+            >
+              <Text style={[styles.priorityText, recurrence === rec && { color: Colors.background }]}>
+                {rec}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>

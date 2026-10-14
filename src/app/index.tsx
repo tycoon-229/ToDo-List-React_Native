@@ -56,7 +56,8 @@ export default function Home() {
     dueDate: '', 
     reminderTime: '',
     categoryId: null as string | null, 
-    tags: ''
+    tags: '',
+    recurrence: 'NONE' as 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY',
   });
 
   // Tự động làm mới dữ liệu mỗi khi người dùng quay lại màn hình Home
@@ -115,6 +116,8 @@ export default function Home() {
       reminder_time: newTask.reminderTime || null,
       category_id: newTask.categoryId, 
       tags: newTask.tags, 
+      recurrence: newTask.recurrence,
+      streak: 0,
       user_id: user.id, 
       status: 'TODO' 
     };
@@ -134,7 +137,8 @@ export default function Home() {
         dueDate: '', 
         reminderTime: '', 
         categoryId: null, 
-        tags: '' 
+        tags: '',
+        recurrence: 'NONE',
       });
       setShowCatDropdown(false);
     }
@@ -144,6 +148,44 @@ export default function Home() {
   const handleToggle = async (id: string) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
+
+    // Nếu là Task lặp lại và đang từ TODO -> bấm hoàn thành: Tự động gia hạn chu kỳ kế tiếp
+    if (task.status === 'TODO' && task.recurrence && task.recurrence !== 'NONE') {
+      const baseDate = task.due_date ? new Date(task.due_date) : new Date();
+      const nextDate = new Date(baseDate);
+
+      if (task.recurrence === 'DAILY') {
+        nextDate.setDate(nextDate.getDate() + 1);
+      } else if (task.recurrence === 'WEEKLY') {
+        nextDate.setDate(nextDate.getDate() + 7);
+      } else if (task.recurrence === 'MONTHLY') {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      }
+
+      const nextDueDateStr = nextDate.toISOString().split('T')[0];
+      const newStreak = (task.streak || 0) + 1;
+
+      // Cập nhật Redux ngay lập tức
+      dispatch(setTasks(tasks.map(t => t.id === id ? {
+        ...t,
+        due_date: nextDueDateStr,
+        streak: newStreak,
+        status: 'TODO'
+      } : t)));
+
+      triggerCyborgNotification('STREAK_EXTENDED', `Chuỗi liên tục đạt cấp độ: ${newStreak} 🔥`);
+
+      // Cập nhật Supabase
+      await supabase.from('tasks').update({
+        due_date: nextDueDateStr,
+        streak: newStreak,
+        status: 'TODO'
+      }).eq('id', id);
+
+      return;
+    }
+
+    // Logic bình thường đối với task không lặp lại
     const newStatus = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED';
     dispatch(toggleTaskStatus(id));
     await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
@@ -313,6 +355,24 @@ export default function Home() {
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* CHỌN CHU KỲ LẶP LẠI */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>RECURRENCE_PROTOCOL //:</Text>
+                <View style={styles.row}>
+                  {(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map(rec => (
+                    <TouchableOpacity 
+                      key={rec} 
+                      style={[styles.priorityBtn, newTask.recurrence === rec && styles.priorityBtnActive]} 
+                      onPress={() => setNewTask({...newTask, recurrence: rec})}
+                    >
+                      <Text style={[styles.priorityText, newTask.recurrence === rec && { color: Colors.background }]}>
+                        {rec}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
           {/* 3. Lọc Danh mục */}
           <Text style={styles.filterSubLabel}>CATEGORY //:</Text>

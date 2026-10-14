@@ -44,6 +44,15 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
             </View>
           )}
 
+          {/* HUY HIỆU CHU KỲ & CHUỖI STREAK */}
+          {task.recurrence && task.recurrence !== 'NONE' && (
+            <View style={[styles.categoryBadge, { borderColor: '#ffae00' }]}>
+              <Text style={[styles.categoryBadgeText, { color: '#ffae00' }]}>
+                ⟳ {task.recurrence} {task.streak && task.streak > 0 ? `🔥${task.streak}` : ''}
+              </Text>
+            </View>
+          )}
+
           {subtasks.length > 0 && (
             <View style={styles.subtaskBadge}>
               <Text style={styles.subtaskBadgeText}>
