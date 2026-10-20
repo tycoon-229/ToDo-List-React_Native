@@ -1,6 +1,3 @@
-Dưới đây là nội dung toàn bộ file **`README.md`** hoàn chỉnh cho dự án TodoList phong cách Cyberpunk của bạn. Bạn chỉ cần copy toàn bộ đoạn bên dưới và paste vào file `README.md` trong thư mục gốc dự án.
-
-```markdown
 # 🤖 CYBORG TODOLIST — Hệ Thống Quản Lý Nhiệm Vụ Phong Cách Cyberpunk
 
 > **Giao thức quản lý công việc thế hệ mới:** Tích hợp giao diện Cyberpunk HUD (Dark/Light Neon), đồng bộ dữ liệu thời gian thực qua Supabase, quản lý trạng thái bằng Redux Toolkit và hỗ trợ đếm ngược Focus/Pomodoro.
@@ -111,8 +108,6 @@ cd android
 
 
 *File APK xuất ra tại:* `android/app/build/outputs/apk/release/app-release.apk`
-
----
 
 ## 📂 Cấu Trúc Mã Nguồn
 
