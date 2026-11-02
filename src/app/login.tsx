@@ -47,50 +47,83 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <GlitchText text={t.login} />
-      
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>{t.email}</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="sys.admin@cyborg.net"
-          placeholderTextColor={colors.textLight}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-      </View>
-      
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>{t.password}</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="********"
-          placeholderTextColor={colors.textLight}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-      </View>
+      <View style={styles.cardContainer}>
+        <GlitchText text={t.login} />
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>{t.email}</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="sys.admin@cyborg.net"
+            placeholderTextColor={colors.textLight}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+        </View>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>{t.password}</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="********"
+            placeholderTextColor={colors.textLight}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+        </View>
 
-      <CustomButton title="INITIALIZE" onPress={handleSignIn} loading={loading} />
-      
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>{t.noAccount}</Text>
-        <TouchableOpacity onPress={() => router.push('/register' as any)}>
-          <Text style={styles.link}>{t.registerNow}</Text>
-        </TouchableOpacity>
+        <CustomButton title="INITIALIZE" onPress={handleSignIn} loading={loading} />
+        
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>{t.noAccount}</Text>
+          <TouchableOpacity onPress={() => router.push('/register' as any)}>
+            <Text style={styles.link}>{t.registerNow}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
 }
 
 const getStyles = (colors: ColorPalette) => StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: colors.background },
+  container: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    padding: 20, 
+    backgroundColor: colors.background 
+  },
+  
+  cardContainer: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: 600,
+    padding: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    justifyContent: 'center',
+    
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+
   inputGroup: { marginBottom: 20 },
-  label: { color: colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 5 },
-  input: { backgroundColor: colors.inputBg, color: colors.white, padding: 15, borderWidth: 1, borderColor: colors.border, fontFamily: 'monospace' },
+  label: { color: colors.primary, fontFamily: 'monospace', fontSize: 14, marginBottom: 8 },
+  input: { 
+    backgroundColor: colors.inputBg, 
+    color: colors.white, 
+    padding: 15, 
+    borderWidth: 1, 
+    borderColor: colors.border, 
+    fontFamily: 'monospace' 
+  },
   footer: { marginTop: 20, alignItems: 'center' },
   footerText: { color: colors.textLight, fontFamily: 'monospace', marginBottom: 10 },
   link: { color: colors.primary, fontFamily: 'monospace', fontWeight: 'bold' }

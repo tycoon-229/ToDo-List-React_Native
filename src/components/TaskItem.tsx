@@ -23,7 +23,10 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
   const categoriesList = useAppSelector(state => state.categories.list);
   const category = task.category_id ? categoriesList.find(c => c.id === task.category_id) : null;
 
-  const subtasks = useAppSelector(state => state.subtasks.list.filter(s => s.task_id === task.id));
+  const timezone = useAppSelector(state => state.settings.timezone);
+  const language = useAppSelector(state => state.settings.language);
+  const allSubtasks = useAppSelector(state => state.subtasks.list);
+  const subtasks = useMemo(() => allSubtasks.filter(s => s.task_id === task.id), [allSubtasks, task.id]);
   const completedSubtasks = subtasks.filter(s => s.is_completed).length;
 
   return (
@@ -78,7 +81,7 @@ export default function TaskItem({ task, onToggle, onDelete }: TaskItemProps) {
           <Text style={[styles.metaText, { color: priorityColor }]}>[{task.priority}]</Text>
           {task.due_date && (
             <Text style={styles.metaText}>
-              {' '} | DUE: {formatDateTimeByZone(task.due_date, useAppSelector(state => state.settings.timezone), useAppSelector(state => state.settings.language))}
+              {' '} | DUE: {formatDateTimeByZone(task.due_date, timezone, language)}
             </Text>
           )}
         </View>

@@ -21,9 +21,12 @@ export default function GlitchText({ text, fontSize = 40 }: GlitchTextProps) {
 
   useEffect(() => {
     const textHeight = fontSize * 1.2;
+    let glitchTimeout: ReturnType<typeof setTimeout> | undefined;
 
     const interval = setInterval(() => {
       if (Math.random() > 0.6) {
+        if (glitchTimeout) clearTimeout(glitchTimeout);
+
         setIsGlitching(true);
         setSlice({
           y: Math.random() * textHeight * 0.8,
@@ -32,31 +35,35 @@ export default function GlitchText({ text, fontSize = 40 }: GlitchTextProps) {
         });
 
         setCuts([
-          { 
-            top: Math.random() * 5 - 2, 
-            left: Math.random() * 5 - 2, 
-            width: Math.random() * 15 + 5, 
-            height: Math.random() * 10 + 5 
+          {
+            top: Math.random() * 5 - 2,
+            left: Math.random() * 5 - 2,
+            width: Math.random() * 15 + 5,
+            height: Math.random() * 10 + 5,
           },
-          { 
-            bottom: Math.random() * 5 - 2, 
-            right: Math.random() * 10 - 2, 
-            width: Math.random() * 20 + 5, 
-            height: Math.random() * 8 + 4 
-          }
+          {
+            bottom: Math.random() * 5 - 2,
+            right: Math.random() * 10 - 2,
+            width: Math.random() * 20 + 5,
+            height: Math.random() * 8 + 4,
+          },
         ]);
 
-        setTimeout(() => {
+        glitchTimeout = setTimeout(() => {
           setIsGlitching(false);
+          glitchTimeout = undefined;
         }, Math.random() * 70 + 50);
       }
     }, 120);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (glitchTimeout) clearTimeout(glitchTimeout);
+    };
   }, [fontSize]);
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} pointerEvents="none">
       <Text style={[styles.mainText, { fontSize }]}>{text}</Text>
 
       {isGlitching && (
@@ -99,6 +106,8 @@ const getStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   glitchLayer: {
     position: 'absolute',
+    top: 0,
+    left: 0,
     fontWeight: '900',
     fontFamily: 'monospace',
     opacity: 0.8,
@@ -123,7 +132,7 @@ const getStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   cutBlock: {
     position: 'absolute',
-    backgroundColor: colors.background, // Tự ăn khớp màu nền Sáng hoặc Tối
+    backgroundColor: colors.background,
     zIndex: 3,
   }
 });

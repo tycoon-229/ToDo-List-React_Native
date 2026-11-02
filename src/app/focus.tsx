@@ -428,7 +428,7 @@ const getStyles = (colors: ColorPalette) => {
       borderColor: colors.border, 
       padding: 10, 
       fontFamily: 'monospace', 
-      fontSize: 14, 
+      fontSize: 14,
       textAlign: 'center' 
     },
     applyBtn: { 
